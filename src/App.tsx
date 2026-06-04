@@ -99,6 +99,132 @@ const newestValidAdditions = (categoryId?: CategoryId) =>
     .reverse()
     .slice(0, 6);
 
+type ProductImageType = "Front View" | "Back View" | "Tag Photo" | "Print Detail" | "Stitch Detail" | "Fade Detail" | "Label Detail" | "Packaging";
+type ProductImageSource = "Community uploaded images" | "Archive Index original photography" | "Brand-authorized photography" | "AI-generated reference images";
+
+interface ProductImageRecord {
+  id: string;
+  productId: string;
+  type: ProductImageType;
+  label: string;
+  source: ProductImageSource;
+  url: string;
+  isPrimary: boolean;
+  metadata: {
+    year: number;
+    country: string;
+    tagType: string;
+    stitchType: string;
+    condition: string;
+  };
+}
+
+const imageTypeMap: Record<string, ProductImageType> = {
+  "Front View": "Front View",
+  "Back View": "Back View",
+  "Tag Photo": "Tag Photo",
+  "Print Detail": "Print Detail",
+  "Stitching Detail": "Stitch Detail",
+  "Stitch Detail": "Stitch Detail",
+  "Fade Detail": "Fade Detail",
+  "Label Detail": "Label Detail",
+  Packaging: "Packaging",
+};
+
+const imageTypeLabel: Record<ProductImageType, string> = {
+  "Front View": "Front View",
+  "Back View": "Back View",
+  "Tag Photo": "Tag Photo",
+  "Print Detail": "Print Detail",
+  "Stitch Detail": "Stitch Detail",
+  "Fade Detail": "Fade Detail",
+  "Label Detail": "Label Detail",
+  Packaging: "Packaging",
+};
+
+const archiveImageSvg = (product: Product, label: string, source: ProductImageSource) => {
+  const category = getCategory(product.categoryId)?.name ?? "Archive";
+  const brand = getBrand(product.brandId)?.name ?? "Archive Index";
+  const title = label === "Archive Image Coming Soon" ? "Archive Image Coming Soon" : label;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(`
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1200">
+      <defs>
+        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#2b2924"/>
+          <stop offset="0.52" stop-color="#17191c"/>
+          <stop offset="1" stop-color="#0f1113"/>
+        </linearGradient>
+        <pattern id="grain" width="18" height="18" patternUnits="userSpaceOnUse">
+          <path d="M0 18L18 0" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
+        </pattern>
+      </defs>
+      <rect width="900" height="1200" fill="url(#g)"/>
+      <rect width="900" height="1200" fill="url(#grain)" opacity=".42"/>
+      <rect x="72" y="72" width="756" height="1056" rx="42" fill="none" stroke="rgba(185,160,107,.48)" stroke-width="3"/>
+      <text x="96" y="150" fill="#b9a06b" font-family="Arial" font-size="32" letter-spacing="5">ARCHIVE INDEX</text>
+      <text x="96" y="245" fill="#f5f5f5" font-family="Arial" font-size="62" font-weight="700">${product.releaseYear}</text>
+      <text x="96" y="322" fill="#f5f5f5" font-family="Arial" font-size="38" font-weight="700">${brand}</text>
+      <foreignObject x="96" y="360" width="708" height="260">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family:Arial;color:#f5f5f5;font-size:44px;line-height:1.08;font-weight:700;letter-spacing:-1px;">${product.name}</div>
+      </foreignObject>
+      <text x="96" y="760" fill="#d7d2c8" font-family="Arial" font-size="34">${title}</text>
+      <text x="96" y="820" fill="#9a9a9a" font-family="Arial" font-size="27">${category} / ${product.country}</text>
+      <text x="96" y="1028" fill="#9a9a9a" font-family="Arial" font-size="24">${source}</text>
+      <text x="96" y="1072" fill="#b9a06b" font-family="Arial" font-size="24">${product.referenceNumber}</text>
+    </svg>
+  `)}`;
+};
+
+const imageMetadataForProduct = (product: Product) => {
+  const tag = getTag(product.tagId);
+  return {
+    year: product.releaseYear,
+    country: product.country,
+    tagType: tag?.label ?? "Unverified tag",
+    stitchType: tag?.stitchType ?? "Unknown stitch",
+    condition: product.condition,
+  };
+};
+
+const getProductImages = (product: Product, submissions: CommunitySubmission[] = communitySubmissions): ProductImageRecord[] => {
+  const approved = submissions.filter((submission) => submission.productId === product.id && submission.status === "Approved");
+  const communityImages = approved.flatMap((submission, submissionIndex) =>
+    submission.photos
+      .map((photo, photoIndex) => imageTypeMap[photo])
+      .filter((type): type is ProductImageType => Boolean(type))
+      .map((type, photoIndex) => ({
+        id: `${submission.id}-${type}-${photoIndex}`,
+        productId: product.id,
+        type,
+        label: imageTypeLabel[type],
+        source: "Community uploaded images" as const,
+        url: archiveImageSvg(product, imageTypeLabel[type], "Community uploaded images"),
+        isPrimary: submissionIndex === 0 && photoIndex === 0,
+        metadata: imageMetadataForProduct(product),
+      })),
+  );
+
+  if (communityImages.length) return communityImages;
+
+  return [
+    {
+      id: `${product.id}-ai-reference`,
+      productId: product.id,
+      type: "Front View",
+      label: "Archive Image Coming Soon",
+      source: "AI-generated reference images",
+      url: archiveImageSvg(product, "Archive Image Coming Soon", "AI-generated reference images"),
+      isPrimary: true,
+      metadata: imageMetadataForProduct(product),
+    },
+  ];
+};
+
+const primaryProductImage = (product: Product) => {
+  const images = getProductImages(product);
+  return images.find((image) => image.isPrimary) ?? images[0];
+};
+
 const categoryRoute = (categoryId: CategoryId) => (categoryId === "designer-archive" ? "designer" : categoryId);
 const normalizeCategorySlug = (slug: string) => (slug === "designer" ? "designer-archive" : slug);
 
@@ -546,17 +672,18 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
   const analysis = aiMarketAnalysis(product);
   const examples = props.submissions.filter((submission) => submission.productId === product.id && submission.status === "Approved");
   const related = validProducts.filter((item) => item.categoryId === product.categoryId && item.id !== product.id).slice(0, 8);
+  const productImages = getProductImages(product, props.submissions);
 
   return (
     <section className="page-stack">
-      <div className="product-layout">
-        <div className="panel sticky-panel"><ArchiveImage product={product} /><div className="cta-stack"><button className="gold-button" onClick={() => props.navigate("/submit")}>아카이브에 기여하기</button><button className="ghost-button" onClick={() => props.navigate("/copyright")}>저작권 문제 신고</button></div></div>
+      <div className="product-layout product-gallery-layout">
+        <div className="panel sticky-panel gallery-panel"><ProductGallery product={product} images={productImages} /></div>
         <div className="product-main panel">
           <p className="eyebrow">{category.name} / {product.referenceNumber}</p>
           <h1>{product.name}</h1>
           <p>{product.description}</p>
-          <div className="stat-grid compact"><Stat label="출시/생산 연도" value={String(product.releaseYear)} /><Stat label="카테고리" value={category.name} /><Stat label="마켓 가격" value={currency(product.marketPrice)} /><Stat label="가격 추세" value={percent(product.priceChangePercent)} tone={product.priceChangePercent >= 0 ? "up" : "down"} /><Stat label="Rarity score" value={`${product.rarityScore}/100`} /><Stat label="Popularity" value={`${product.popularity}/100`} /></div>
-          <div className="two-column-copy"><InfoPanel title="역사적 의미" text={product.historicalSignificance} /><InfoPanel title="Cultural impact" text={product.culturalImpact} /><InfoPanel title="생산 디테일" text={product.productionDetails} /><InfoPanel title="알려진 변형" text={product.knownVariants.join(". ")} /></div>
+          <div className="stat-grid compact"><Stat label="출시/생산 연도" value={String(product.releaseYear)} /><Stat label="카테고리" value={category.name} /><Stat label="평균 마켓 가격" value={currency(summary.average || product.marketPrice)} /><Stat label="가격 추세" value={percent(product.priceChangePercent)} tone={product.priceChangePercent >= 0 ? "up" : "down"} /><Stat label="희귀도" value={`${product.rarityScore}/100`} /><Stat label="Archive Score" value={`${product.archiveScore}/100`} /></div>
+          <div className="two-column-copy"><InfoPanel title="역사적 의미" text={product.historicalSignificance} /><InfoPanel title="Cultural impact" text={product.culturalImpact} /><InfoPanel title="생산 디테일" text={product.productionDetails} /><InfoPanel title="Known variants" text={product.knownVariants.join(". ")} /></div>
         </div>
       </div>
 
@@ -578,6 +705,11 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
       <section className="split-grid">
         <div className="panel"><SectionTitle eyebrow="AI 마켓 분석" title="빈티지 특화 분석 근거" />{Object.entries(analysis).map(([key, value]) => <p className="analysis-line" key={key}><strong>{labelize(key)}:</strong> {String(value)}</p>)}</div>
         <div className="panel"><SectionTitle eyebrow="인증 모듈" title="의류 증거 비교" /><ul className="check-list"><li>태그 비교: {tag.label}, {tag.yearStart}-{tag.yearEnd}, {tag.country}.</li><li>프린트 비교: 잉크 노화, 크랙 방향, 실크스크린 정렬, 바디 호환성을 확인합니다.</li><li>스티치 비교: {tag.stitchType}; 솔기 장력과 실 산화를 확인합니다.</li><li>제조국 비교: 케어라벨 문구, 라벨 언어, 당시 수입 규정을 대조합니다.</li><li>생산 시기 비교: 알려진 변형과 마켓 사례를 기준으로 검증합니다.</li></ul></div>
+      </section>
+
+      <section className="split-grid">
+        <div className="panel"><SectionTitle eyebrow="Historical Timeline" title="제품 맥락" /><ol className="compact-timeline">{productHistoricalTimeline(product, brand.name).map((event) => <li key={`${event.year}-${event.title}`}><time>{event.year}</time><strong>{event.title}</strong><p>{event.description}</p></li>)}</ol></div>
+        <div className="panel"><SectionTitle eyebrow="Collector Notes" title="컬렉터 노트" /><ul className="check-list"><li>Primary image source: {productImages[0]?.source}</li><li>Archive Score {product.archiveScore}/100 - 연도, 태그, 생산국, 거래 이력, 출처 기반.</li><li>마켓플레이스 이미지는 저장하지 않고 텍스트 외부 링크만 제공합니다.</li></ul></div>
       </section>
 
       <section className="panel"><SectionTitle eyebrow="태그 정보" title={tag.label} /><div className="tag-grid"><TagCard tagId={tag.id} /></div></section>
@@ -656,9 +788,28 @@ function ContributionPage({ navigate, submissions, setSubmissions }: { navigate:
 
 function AdminPage({ submissions, setSubmissions }: { submissions: CommunitySubmission[]; setSubmissions: (items: CommunitySubmission[]) => void }) {
   const updateStatus = (id: string, status: SubmissionStatus) => setSubmissions(submissions.map((item) => item.id === id ? { ...item, status } : item));
+  const imageQueue = submissions.slice(0, 12).map((submission) => {
+    const product = validProducts.find((item) => item.id === submission.productId) ?? products.find((item) => item.id === submission.productId)!;
+    return { submission, product, images: getProductImages(product, [submission]) };
+  });
+
   return (
     <section className="page-stack">
       <PageHero eyebrow="아카이브 검토 패널" title="공개 전 커뮤니티 제출 자료를 검토합니다." description="관리자는 승인, 거절, 추가 사진 요청, 중복 항목 병합, 메타데이터 수정을 할 수 있습니다." />
+      <section className="panel admin-image-panel">
+        <SectionTitle eyebrow="Image Admin" title="제품 이미지 관리" />
+        <div className="admin-image-actions"><button>Upload Images</button><button>Replace Images</button><button>Approve Community Photos</button><button>Delete Images</button><button>Set Primary Image</button></div>
+        <div className="admin-image-grid">
+          {imageQueue.map(({ submission, product, images }) => (
+            <article key={submission.id}>
+              <ProductImageView image={images[0]} product={product} compact />
+              <strong>{product.name}</strong>
+              <span>{statusLabel(submission.status)} / {submission.photos.length} photos</span>
+              <div className="admin-inline-actions"><button onClick={() => updateStatus(submission.id, "Approved")}>Approve</button><button onClick={() => updateStatus(submission.id, "Rejected")}>Delete</button><button onClick={() => updateStatus(submission.id, "Flagged")}>Request Replace</button></div>
+            </article>
+          ))}
+        </div>
+      </section>
       <div className="review-list">{submissions.slice(0, 24).map((submission) => { const product = validProducts.find((item) => item.id === submission.productId) ?? products.find((item) => item.id === submission.productId)!; return <div className="panel review-card" key={submission.id}><div><p className="eyebrow">{statusLabel(submission.status)}</p><h3>{product.name}</h3><p>기여자: {submission.contributor} / {submission.contributionDate}. 권리 동의: {submission.rightsAgreementAt}</p><p>{submission.authenticationNotes}</p></div><div className="review-actions"><button onClick={() => updateStatus(submission.id, "Approved")}>승인</button><button onClick={() => updateStatus(submission.id, "Rejected")}>거절</button><button onClick={() => updateStatus(submission.id, "Flagged")}>추가 사진 요청</button><button>중복 항목 병합</button><button>메타데이터 수정</button></div></div>; })}</div>
     </section>
   );
@@ -745,17 +896,85 @@ function ProductRail({ title, products: railProducts, ...props }: SharedProps & 
 function ProductCard({ product, openProduct, favorites, setFavorites, watchlist, setWatchlist }: SharedProps & { product: Product }) {
   const brand = getBrand(product.brandId)!;
   const category = getCategory(product.categoryId)!;
+  const image = primaryProductImage(product);
+  const averagePrice = summarizeMarket(productTransactions(product.id)).average || product.marketPrice;
   const toggle = (list: string[], setter: (ids: string[]) => void) => setter(list.includes(product.id) ? list.filter((id) => id !== product.id) : [...list, product.id]);
   return (
-    <article className="product-card">
-      <button className="image-button" onClick={() => openProduct(product)}><ArchiveImage product={product} compact /></button>
-      <div className="product-card-body"><p className="eyebrow">{brand.name} / {category.name}</p><h3><button onClick={() => openProduct(product)}>{product.name}</button></h3><div className="metric-row"><span>{product.releaseYear}</span><strong>{currency(product.marketPrice)}</strong></div><div className="pill-row"><span>Archive Score {product.archiveScore}</span><span>희귀도 {product.rarityScore}</span><span className={product.priceChangePercent >= 0 ? "up" : "down"}>{percent(product.priceChangePercent)}</span></div><div className="card-actions"><button onClick={() => toggle(favorites, setFavorites)}>{favorites.includes(product.id) ? "즐겨찾기됨" : "즐겨찾기"}</button><button onClick={() => toggle(watchlist, setWatchlist)}>{watchlist.includes(product.id) ? "추적 중" : "관심추적"}</button></div></div>
+    <article className="product-card image-product-card">
+      <button className="image-button" onClick={() => openProduct(product)} aria-label={`${product.name} 상세 보기`}>
+        <ProductImageView image={image} product={product} compact />
+      </button>
+      <div className="product-card-body">
+        <p className="eyebrow">{category.name}</p>
+        <h3><button onClick={() => openProduct(product)}>{product.name}</button></h3>
+        <div className="product-card-meta"><span>{product.releaseYear}</span><span>{currency(averagePrice)}</span></div>
+        <div className="pill-row"><span>희귀도 {product.rarityScore}</span><span>Archive Score {product.archiveScore}</span></div>
+        <div className="card-actions"><button onClick={() => toggle(favorites, setFavorites)}>{favorites.includes(product.id) ? "즐겨찾기됨" : "즐겨찾기"}</button><button onClick={() => toggle(watchlist, setWatchlist)}>{watchlist.includes(product.id) ? "추적 중" : "관심추적"}</button></div>
+      </div>
     </article>
   );
 }
 
-function ArchiveImage({ product, compact = false }: { product: Product; compact?: boolean }) {
-  return <div className={`archive-image ${compact ? "compact" : ""}`}><span>{getCategory(product.categoryId)?.name}</span><strong>{product.releaseYear}</strong><em>{product.referenceNumber}</em><small>직접 제작 / 사용자 업로드 이미지 영역</small></div>;
+
+function ProductGallery({ product, images }: { product: Product; images: ProductImageRecord[] }) {
+  const [activeType, setActiveType] = useState<ProductImageType | null>(images[0]?.type ?? null);
+  const [zoomedImage, setZoomedImage] = useState<ProductImageRecord | null>(null);
+  const availableTypes = Array.from(new Set(images.map((image) => image.type)));
+  const visibleImages = activeType ? images.filter((image) => image.type === activeType) : images;
+  const primary = visibleImages[0] ?? images[0];
+
+  useEffect(() => {
+    if (!activeType || !availableTypes.includes(activeType)) setActiveType(images[0]?.type ?? null);
+  }, [activeType, availableTypes, images]);
+
+  if (!images.length || !primary) return null;
+
+  return (
+    <section className="product-gallery" aria-label={`${product.name} image gallery`}>
+      {availableTypes.length > 1 && (
+        <div className="gallery-tabs" role="tablist">
+          {availableTypes.map((type) => (
+            <button key={type} className={activeType === type ? "active" : ""} onClick={() => setActiveType(type)}>{imageTypeLabel[type]}</button>
+          ))}
+        </div>
+      )}
+      <div className={`gallery-grid images-${Math.min(visibleImages.length, 5)} ${visibleImages.length >= 5 ? "masonry" : ""}`}>
+        {visibleImages.map((image) => (
+          <ProductImageView key={image.id} image={image} product={product} onOpen={() => setZoomedImage(image)} />
+        ))}
+      </div>
+      <div className="image-metadata-card">
+        <p className="eyebrow">Image Metadata</p>
+        <div className="metadata-grid">
+          <span>Year: {primary.metadata.year}</span>
+          <span>Country: {primary.metadata.country}</span>
+          <span>Tag Type: {primary.metadata.tagType}</span>
+          <span>Stitch Type: {primary.metadata.stitchType}</span>
+          <span>Condition: {primary.metadata.condition}</span>
+          <span>Source: {primary.source}</span>
+        </div>
+      </div>
+      {zoomedImage && (
+        <div className="image-lightbox" role="dialog" aria-modal="true" onClick={() => setZoomedImage(null)}>
+          <button className="lightbox-close" onClick={() => setZoomedImage(null)}>Close</button>
+          <img src={zoomedImage.url} alt={`${product.name} ${zoomedImage.label}`} />
+          <p>{zoomedImage.label} / {zoomedImage.source}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ProductImageView({ image, product, compact = false, onOpen }: { image: ProductImageRecord; product: Product; compact?: boolean; onOpen?: () => void }) {
+  return (
+    <figure className={`archive-photo ${compact ? "compact" : ""}`} onClick={onOpen}>
+      <img src={image.url} alt={`${product.name} ${image.label}`} loading="lazy" />
+      <figcaption>
+        <span>{image.label}</span>
+        <strong>{image.metadata.year}</strong>
+      </figcaption>
+    </figure>
+  );
 }
 
 function TagCard({ tagId }: { tagId: string }) {
@@ -774,6 +993,14 @@ function FilterControls({ filters, setFilters, brands }: { filters: CategoryFilt
   return <div className="filter-panel nested"><select value={filters.brand} onChange={(event) => update("brand", event.target.value)}><option value="All">전체</option>{brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select><select value={filters.year} onChange={(event) => update("year", event.target.value)}><option value="All">전체</option>{["194", "195", "196", "197", "198", "199", "200"].map((item) => <option key={item} value={item}>{item}0년대</option>)}</select><select value={filters.country} onChange={(event) => update("country", event.target.value)}><option value="All">전체</option>{Array.from(new Set(validProducts.map((item) => item.country))).map((item) => <option key={item}>{item}</option>)}</select><select value={filters.condition} onChange={(event) => update("condition", event.target.value)}><option value="All">전체</option>{["Deadstock", "Excellent", "Very Good", "Good", "Fair", "Distressed"].map((item) => <option key={item}>{item}</option>)}</select><select value={filters.marketplace} onChange={(event) => update("marketplace", event.target.value)}><option value="All">전체</option>{marketplaces.map((item) => <option key={item}>{item}</option>)}</select><select value={filters.price} onChange={(event) => update("price", event.target.value)}><option value="All">전체</option><option>Under $250</option><option>$250-$750</option><option>$750+</option></select></div>;
 }
 
+
+
+function productHistoricalTimeline(product: Product, brandName: string) {
+  return [
+    { year: product.releaseYear, title: `${brandName} 생산/릴리스 기록`, description: `${product.name}은(는) ${product.releaseYear}년 ${product.country} 생산 맥락으로 분류됩니다.` },
+    { year: Math.min(2024, product.releaseYear + 8), title: "컬렉터 시장 편입", description: "태그, 컨디션, 거래 기록이 누적되며 아카이브 레퍼런스로 추적됩니다." },
+  ].filter((event) => event.year <= 2024);
+}
 
 function TransactionScatterChart({ records }: { records: MarketTransaction[] }) {
   const prices = records.map((record) => record.price);
