@@ -792,109 +792,109 @@ function Header({ query, setQuery, navigate }: { query: string; setQuery: (value
 }
 
 function HomePage(props: SharedProps & { recent: string[]; query: string; setQuery: (value: string) => void }) {
-  const marketSummary = summarizeMarket(validTransactions);
-  const categoryCounts = cultureCollections.map((collection) => ({
-    collection,
-    count: productsForCultureCollection(collection.slug).length,
-  }));
-  const latestArchive = newestValidAdditions().slice(0, 4);
-  const recentSales = validTransactions.slice(-4).reverse();
-  const popularTags = topArchiveTags.slice(0, 8);
-  const recentProducts = props.recent.map((id) => validProducts.find((product) => product.id === id)).filter(Boolean) as Product[];
-  const collectionRun = useMemo(() => runDailyArchiveCollection(), []);
-
+  const featuredNames = ["Alien Workshop", "Nirvana", "Raf Simons", "Stussy", "Metallica"];
+  const featuredArchive = featuredNames
+    .map((name) => validProducts.find((product) => product.name.includes(name) || getBrand(product.brandId)?.name === name))
+    .filter(Boolean) as Product[];
+  const fallbackFeatured = featuredArchive.length >= 5 ? featuredArchive : [...featuredArchive, ...newestValidAdditions()].slice(0, 5);
+  const latestArchive = newestValidAdditions().slice(0, 8);
+  const brandWallNames = ["Stussy", "Alien Workshop", "Raf Simons", "Pink Floyd", "Metallica", "Helmut Lang", "Supreme", "A Bathing Ape", "Undercover", "Number (N)ine"];
+  const brandWall = brandWallNames.map((name) => visibleBrands.find((brand) => brand.name === name)).filter(Boolean) as typeof brands;
+  const researchNotes = [
+    "1990s Single Stitch Band Tee Tag Study",
+    "Skate Graphics and Board Culture Index",
+    "Raf Simons Youth Culture References",
+    "Stussy Tribe and Early Streetwear Networks",
+  ];
 
   return (
-    <section className="page-stack home-redesign">
-      <section className="archive-hero panel">
-        <div className="archive-hero-copy">
-          <p className="eyebrow">Subculture / Fashion / Music / Skateboarding</p>
+    <section className="home-exhibition">
+      <section className="exhibition-hero">
+        <div className="hero-archive-backdrop" aria-hidden="true">
+          {fallbackFeatured.slice(0, 5).map((product, index) => <ArchiveVisual key={product.id} product={product} variant={`v${index + 1}`} />)}
+        </div>
+        <div className="exhibition-hero-copy">
+          <p className="eyebrow">Music / Skateboarding / Streetwear / Fashion</p>
           <h1>ARCHIVE INDEX</h1>
-          <h2>서브컬처 빈티지 아카이브</h2>
-          <p>
-            Archive Index는 밴드 티셔츠, 스케이트보드 문화, 스트리트웨어, 디자이너 아카이브를 기록하는 문화 데이터베이스입니다.
-          </p>
-          <div className="hero-stat-line">
-            <strong>{validProducts.length.toLocaleString()} Products</strong>
-            <strong>{visibleBrands.length.toLocaleString()} Brands</strong>
-            <strong>{validTags.length.toLocaleString()} Tag Records</strong>
-          </div>
+          <h2>A Cultural Archive of Vintage Clothing and Subculture</h2>
           <div className="hero-actions">
-            <button className="gold-button" onClick={() => props.navigate("/search")}>검색하기</button>
-            <button className="ghost-button" onClick={() => props.navigate("/archive")}>아카이브 둘러보기</button>
+            <button className="gold-button" onClick={() => props.navigate("/archive")}>ENTER ARCHIVE</button>
+            <button className="ghost-button" onClick={() => props.navigate("/search")}>SEARCH ARCHIVE</button>
           </div>
         </div>
       </section>
 
-
-      <section id="archive-categories" className="category-nav-section panel">
-        <SectionTitle eyebrow="Archive Navigation" title="카테고리별 아카이브" />
-        <div className="category-grid category-nav-grid">
-          {categoryCounts.map(({ collection, count }) => (
-            <button className="category-card panel" key={collection.slug} onClick={() => props.navigate(`/category/${collection.slug}`)}>
-              <span className="eyebrow">{count.toLocaleString()} verified references</span>
-              <h2>{collection.shortName}</h2>
-              <p>{collection.description}</p>
-            </button>
-          ))}
+      <section className="exhibition-section">
+        <SectionTitle eyebrow="Featured Archive" title="대표 아카이브" />
+        <div className="featured-archive-grid">
+          {fallbackFeatured.map((product) => <FeaturedArchiveCard key={product.id} product={product} openProduct={props.openProduct} />)}
         </div>
       </section>
 
-      <section className="data-dashboard-grid">
-        <div className="panel data-list-card">
-          <SectionTitle eyebrow="Latest Archive" title="최근 추가된 아카이브" />
-          {latestArchive.map((product) => (
-            <button key={product.id} className="data-row" onClick={() => props.openProduct(product)}>
-              <span>{product.name}</span>
-              <strong>{product.releaseYear}</strong>
-            </button>
-          ))}
-        </div>
-        <div className="panel data-list-card">
-          <SectionTitle eyebrow="Market Feed" title="최근 거래 기록" />
-          {recentSales.map((sale) => {
-            const product = validProducts.find((item) => item.id === sale.productId);
-            return <button key={sale.id} className="data-row" onClick={() => product && props.openProduct(product)}><span>{product?.name}</span><strong>{currency(sale.price)}</strong></button>;
+      <section className="exhibition-section">
+        <SectionTitle eyebrow="Category Archive" title="문화별 아카이브" />
+        <div className="culture-card-grid">
+          {cultureCollections.map((collection) => {
+            const collectionProducts = productsForCultureCollection(collection.slug);
+            return <CultureArchiveCard key={collection.slug} collection={collection} products={collectionProducts} navigate={props.navigate} />;
           })}
         </div>
-        <div className="panel data-list-card tag-cloud-card">
-          <SectionTitle eyebrow="Tag Index" title="인기 태그" />
-          <div className="tag-cloud">{popularTags.map(({ tag, count }) => <button key={tag.id} onClick={() => props.navigate(`/tag/${tag.id}`)}>#{tag.label}<span>{count}</span></button>)}</div>
+      </section>
+
+      <section className="exhibition-section">
+        <SectionTitle eyebrow="Brand Wall" title="주요 브랜드 / 밴드" />
+        <div className="brand-wall-grid">
+          {brandWall.map((brand) => <BrandWallCard key={brand.id} brand={brand} navigate={props.navigate} />)}
         </div>
       </section>
 
-      <section className="panel collector-status-card">
-        <div className="section-head">
-          <SectionTitle eyebrow="Daily Collection" title="자동 데이터 수집 시스템" />
-          <span className="collector-date">{collectionRun.lastRunDate} / 매일 1회</span>
+      <section className="exhibition-section latest-and-research">
+        <div>
+          <SectionTitle eyebrow="Latest Additions" title="최근 추가된 아카이브" />
+          <div className="latest-archive-list">
+            {latestArchive.map((product) => <button key={product.id} onClick={() => props.openProduct(product)}><span>{product.name}</span><small>{getBrand(product.brandId)?.name} / {product.releaseYear}</small></button>)}
+          </div>
         </div>
-        <div className="collector-grid">
-          <Stat label="수집 소스" value={collectionRun.sources.length.toString()} />
-          <Stat label="검증 통과" value={collectionRun.accepted.length.toString()} />
-          <Stat label="검증 제외" value={collectionRun.rejected.length.toString()} />
-          <Stat label="아카이브 기준" value="1900~2024" />
-        </div>
-        <div className="collector-source-row">{collectionRun.sources.map((source) => <span key={source}>{source}</span>)}</div>
-      </section>
-
-      <section className="split-grid">
-        <div className="panel">
+        <div>
           <SectionTitle eyebrow="Research Notes" title="최근 연구 자료" />
-          <ul className="check-list">
-            <li>1990년대 싱글 스티치 밴드 티셔츠 태그 비교</li>
-            <li>스케이트 브랜드 그래픽과 보드 컬처 아카이브</li>
-            <li>디자이너 아카이브에서 컬렉션 맥락이 갖는 의미</li>
-          </ul>
-        </div>
-        <div className="panel">
-          <SectionTitle eyebrow="Archive Principle" title="양보다 품질, 자동 생성보다 검증" />
-          <p>제품은 역사성, 문화성, 태그 정보, 거래 이력, 이미지 상태를 함께 검토해 등록됩니다. 시장 데이터는 기록을 보조하는 자료로만 사용됩니다.</p>
+          <div className="latest-archive-list research-list">
+            {researchNotes.map((note) => <button key={note} onClick={() => props.navigate("/archive")}><span>{note}</span><small>Archive study</small></button>)}
+          </div>
         </div>
       </section>
-
-      <ProductRail title="가격 변동 상위" products={topValidMovers()} {...props} />
-      {!!recentProducts.length && <ProductRail title="최근 본 항목" products={recentProducts} {...props} />}
     </section>
+  );
+}
+
+function FeaturedArchiveCard({ product, openProduct }: { product: Product; openProduct: (product: Product) => void }) {
+  const image = primaryProductImage(product);
+  return (
+    <button className="featured-archive-card" onClick={() => openProduct(product)}>
+      {image ? <ProductImageView image={image} product={product} compact /> : <ArchiveVisual product={product} />}
+      <span>{product.releaseYear}</span>
+      <strong>{product.name}</strong>
+    </button>
+  );
+}
+
+function CultureArchiveCard({ collection, products, navigate }: { collection: (typeof cultureCollections)[number]; products: Product[]; navigate: (path: string) => void }) {
+  const preview = products.slice(0, 3);
+  return (
+    <button className="culture-archive-card" onClick={() => navigate(`/category/${collection.slug}`)}>
+      <div className="culture-visual-stack">{preview.map((product, index) => <ArchiveVisual key={product.id} product={product} variant={`stack-${index}`} />)}</div>
+      <strong>{collection.name}</strong>
+      <span>{collection.brandNames.slice(0, 3).join(" / ")}</span>
+    </button>
+  );
+}
+
+function BrandWallCard({ brand, navigate }: { brand: (typeof brands)[number]; navigate: (path: string) => void }) {
+  const product = validProducts.find((item) => item.brandId === brand.id);
+  return (
+    <button className="brand-wall-card" onClick={() => navigate(`/brand/${brand.slug}`)}>
+      {product ? <ArchiveVisual product={product} /> : <div className="archive-visual blank" />}
+      <strong>{brand.name}</strong>
+    </button>
   );
 }
 
@@ -940,10 +940,23 @@ function TagPage(props: SharedProps & { slug: string }) {
         <section className="panel">
           <div className="section-head"><SectionTitle eyebrow="Related Products" title={`관련 제품 ${relatedProducts.length.toLocaleString()}개`} /></div>
           <div className="tag-context-card"><strong>{tag.group}</strong><p>{tag.description}</p></div>
+          <TagRelationshipSummary products={relatedProducts} navigate={props.navigate} />
           <div className="product-grid">{relatedProducts.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
         </section>
       )}
     </section>
+  );
+}
+
+
+function TagRelationshipSummary({ products, navigate }: { products: Product[]; navigate: (path: string) => void }) {
+  const relatedBrands = Array.from(new Map(products.map((product) => getBrand(product.brandId)).filter(Boolean).map((brand) => [brand!.id, brand!])).values()).slice(0, 8);
+  const relatedEras = Array.from(new Set(products.map((product) => eraLabel(product.releaseYear)))).slice(0, 6);
+  return (
+    <div className="tag-relationship-summary">
+      <div><p className="eyebrow">Related Brands</p>{relatedBrands.map((brand) => <button key={brand.id} onClick={() => navigate(`/brand/${brand.slug}`)}>{brand.name}</button>)}</div>
+      <div><p className="eyebrow">Related Eras</p>{relatedEras.map((era) => <span key={era}>{era}</span>)}</div>
+    </div>
   );
 }
 
@@ -1097,6 +1110,7 @@ function BrandPage(props: SharedProps & { slug: string }) {
       </section>
 
       <BrandTimeline events={profile.timeline} />
+      {brand.categoryId === "band-tee" && <BandCulturePanel bandName={brand.name} />}
 
       <section className="panel">
         <SectionTitle eyebrow="주요 태그" title={`${brand.name} 연결 태그`} />
@@ -1152,7 +1166,7 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
           <p className="eyebrow">{category.name} / {product.referenceNumber}</p>
           <h1>{product.name}</h1>
           <p>{product.description}</p>
-          <div className="stat-grid compact"><Stat label="출시/생산 연도" value={String(product.releaseYear)} /><Stat label="카테고리" value={category.name} /><Stat label="평균 마켓 가격" value={currency(summary.average || product.marketPrice)} /><Stat label="가격 추세" value={percent(product.priceChangePercent)} tone={product.priceChangePercent >= 0 ? "up" : "down"} /><Stat label="희귀도" value={`${product.rarityScore}/100`} /><Stat label="Archive Score" value={`${product.archiveScore}/100`} /></div>
+          <div className="stat-grid compact"><Stat label="출시/생산 연도" value={String(product.releaseYear)} /><Stat label="문화 카테고리" value={category.name} /><Stat label="브랜드 / 밴드" value={brand.name} /><Stat label="희귀도" value={`${product.rarityScore}/100`} /><Stat label="Archive Score" value={`${product.archiveScore}/100`} /><Stat label="Image Status" value={getProductImageCollection(product).imageStatus} /></div>
           <ProductTagList product={product} navigate={props.navigate} />
           <div className="two-column-copy"><InfoPanel title="역사적 의미" text={product.historicalSignificance} /><InfoPanel title="Cultural impact" text={product.culturalImpact} /><InfoPanel title="생산 디테일" text={product.productionDetails} /><InfoPanel title="Known variants" text={product.knownVariants.join(". ")} /></div>
         </div>
@@ -1394,6 +1408,19 @@ function ProductCard({ product, openProduct, favorites, setFavorites, watchlist,
 
 
 
+
+function ArchiveVisual({ product, variant = "default" }: { product: Product; variant?: string }) {
+  const category = getCategory(product.categoryId)?.name ?? "Archive";
+  const brand = getBrand(product.brandId)?.name ?? "Archive";
+  return (
+    <div className={`archive-visual ${variant}`} aria-label={`${brand} ${category} representative archive visual`}>
+      <i></i>
+      <b></b>
+      <em></em>
+    </div>
+  );
+}
+
 function ProductImageStatusPanel({ product }: { product: Product }) {
   const collection = getProductImageCollection(product);
   return (
@@ -1462,16 +1489,7 @@ function ProductGallery({ product, images }: { product: Product; images: Product
 
 
 function ProductDefaultVisual({ product, compact = false }: { product: Product; compact?: boolean }) {
-  const brand = getBrand(product.brandId)?.name ?? "ARCHIVE";
-  const category = getCategory(product.categoryId)?.name ?? "Archive";
-  const collection = getProductImageCollection(product);
-  return (
-    <div className={`default-product-visual ${compact ? "compact" : ""}`}>
-      <span>{category}</span>
-      <strong>{brand}</strong>
-      <small>{collection.imageStatus} / retry {collection.retryCount}/30</small>
-    </div>
-  );
+  return <ArchiveVisual product={product} variant={compact ? "compact" : "default"} />;
 }
 
 function ProductImageView({ image, product, compact = false, onOpen }: { image: ProductImageRecord; product: Product; compact?: boolean; onOpen?: () => void }) {
@@ -1702,6 +1720,23 @@ function representativeBrandProducts(name: string, productsForBrand: Product[]) 
   if (curated?.length) return curated;
   const fromProducts = productsForBrand.slice().sort((a, b) => b.archiveScore - a.archiveScore).slice(0, 3).map((product) => product.name.replace(`${name} `, ""));
   return fromProducts.length ? fromProducts : ["대표 아카이브 준비 중"];
+}
+
+
+function BandCulturePanel({ bandName }: { bandName: string }) {
+  const bandData: Record<string, { albums: string[]; tours: string[] }> = {
+    Nirvana: { albums: ["Bleach", "Nevermind", "In Utero"], tours: ["Nevermind Tour", "In Utero Tour", "MTV Live and Loud"] },
+    Metallica: { albums: ["Kill 'Em All", "Master of Puppets", "Black Album"], tours: ["Damage, Inc. Tour", "Wherever We May Roam", "Nowhere Else to Roam"] },
+    "Pink Floyd": { albums: ["The Dark Side of the Moon", "The Wall", "The Division Bell"], tours: ["In the Flesh", "The Wall Tour", "Division Bell Tour"] },
+  };
+  const data = bandData[bandName];
+  if (!data) return null;
+  return (
+    <section className="split-grid band-culture-panel">
+      <div className="panel"><SectionTitle eyebrow="대표 앨범" title="Albums" /><ul className="check-list">{data.albums.map((album) => <li key={album}>{album}</li>)}</ul></div>
+      <div className="panel"><SectionTitle eyebrow="대표 투어" title="Tours" /><ul className="check-list">{data.tours.map((tour) => <li key={tour}>{tour}</li>)}</ul></div>
+    </section>
+  );
 }
 
 function BrandTimeline({ events }: { events: BrandTimelineEvent[] }) {
