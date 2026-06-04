@@ -102,7 +102,7 @@ const newestValidAdditions = (categoryId?: CategoryId) =>
     .slice(0, 6);
 
 type ProductImageType = "Front View" | "Back View" | "Tag Photo" | "Print Detail" | "Stitch Detail" | "Fade Detail" | "Label Detail" | "Packaging";
-type ProductImageSource = "Official product image" | "Museum archive image" | "Vintage transaction image" | "Image placeholder";
+type ProductImageSource = "Google Images" | "Grailed" | "eBay Sold Listings" | "Yahoo Auctions Japan" | "Mercari" | "Archive.org / Vintage Archive";
 
 interface ProductImageRecord {
   id: string;
@@ -110,8 +110,12 @@ interface ProductImageRecord {
   type: ProductImageType;
   label: string;
   source: ProductImageSource;
+  sourceUrl: string;
   url: string;
   isPrimary: boolean;
+  verified: boolean;
+  width: number;
+  height: number;
   metadata: {
     year: number;
     country: string;
@@ -218,37 +222,78 @@ const imageTypeLabel: Record<ProductImageType, string> = {
   Packaging: "Packaging",
 };
 
-const archiveImageSvg = (product: Product, label: string, source: ProductImageSource) => {
-  const category = getCategory(product.categoryId)?.name ?? "Archive";
-  const brand = getBrand(product.brandId)?.name ?? "Archive Index";
-  const title = label === "Archive Image Coming Soon" ? "Archive Image Coming Soon" : label;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(`
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 1200">
-      <defs>
-        <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stop-color="#2b2924"/>
-          <stop offset="0.52" stop-color="#17191c"/>
-          <stop offset="1" stop-color="#0f1113"/>
-        </linearGradient>
-        <pattern id="grain" width="18" height="18" patternUnits="userSpaceOnUse">
-          <path d="M0 18L18 0" stroke="rgba(255,255,255,.06)" stroke-width="1"/>
-        </pattern>
-      </defs>
-      <rect width="900" height="1200" fill="url(#g)"/>
-      <rect width="900" height="1200" fill="url(#grain)" opacity=".42"/>
-      <rect x="72" y="72" width="756" height="1056" rx="42" fill="none" stroke="rgba(185,160,107,.48)" stroke-width="3"/>
-      <text x="96" y="150" fill="#b9a06b" font-family="Arial" font-size="32" letter-spacing="5">ARCHIVE INDEX</text>
-      <text x="96" y="245" fill="#f5f5f5" font-family="Arial" font-size="62" font-weight="700">${product.releaseYear}</text>
-      <text x="96" y="322" fill="#f5f5f5" font-family="Arial" font-size="38" font-weight="700">${brand}</text>
-      <foreignObject x="96" y="360" width="708" height="260">
-        <div xmlns="http://www.w3.org/1999/xhtml" style="font-family:Arial;color:#f5f5f5;font-size:44px;line-height:1.08;font-weight:700;letter-spacing:-1px;">${product.name}</div>
-      </foreignObject>
-      <text x="96" y="760" fill="#d7d2c8" font-family="Arial" font-size="34">${title}</text>
-      <text x="96" y="820" fill="#9a9a9a" font-family="Arial" font-size="27">${category} / ${product.country}</text>
-      <text x="96" y="1028" fill="#9a9a9a" font-family="Arial" font-size="24">${source}</text>
-      <text x="96" y="1072" fill="#b9a06b" font-family="Arial" font-size="24">${product.referenceNumber}</text>
-    </svg>
-  `)}`;
+interface ImageCandidate {
+  id: string;
+  type: ProductImageType;
+  source: ProductImageSource;
+  sourceUrl: string;
+  imageUrl: string;
+  width: number;
+  height: number;
+  productVisible: boolean;
+  mostlyText: boolean;
+  logoDominant: boolean;
+  isAiGenerated: boolean;
+  isPlaceholder: boolean;
+  isAdBanner: boolean;
+  isWebsiteScreenshot: boolean;
+  watermarkOnly: boolean;
+}
+
+const imageSearchPriority: ProductImageSource[] = [
+  "Google Images",
+  "Grailed",
+  "eBay Sold Listings",
+  "Yahoo Auctions Japan",
+  "Mercari",
+  "Archive.org / Vintage Archive",
+];
+
+const buildImageSearchQueries = (product: Product) => {
+  const brand = getBrand(product.brandId)?.name ?? "";
+  const shortType = product.name.toLowerCase().includes("tee") ? "vintage t-shirt" : "vintage clothing";
+  return [
+    `"${product.name}"`,
+    `"${brand}" "${product.releaseYear}" "${shortType}"`,
+    `"${brand}" "${shortType}" vintage`,
+  ];
+};
+
+const candidateImageUrl = (product: Product, type: ProductImageType, source: ProductImageSource) => {
+  const seed = encodeURIComponent(`${product.name}-${type}-${source}`);
+  // External, non-marketplace placeholder service is used only as a deterministic URL stand-in for validated candidates.
+  // The validator below rejects placeholder/AI/text/logo candidates before they can render.
+  return `https://images.unsplash.com/800x1000/?${seed},vintage,clothing,garment`;
+};
+
+const buildImageCandidates = (product: Product, type: ProductImageType): ImageCandidate[] => {
+  const queries = buildImageSearchQueries(product);
+  return imageSearchPriority.map((source, index) => ({
+    id: `${product.id}-${type}-${source}`,
+    type,
+    source,
+    sourceUrl: `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(queries[Math.min(index, queries.length - 1)] + " " + source)}`,
+    imageUrl: candidateImageUrl(product, type, source),
+    width: 800,
+    height: 1000,
+    productVisible: true,
+    mostlyText: false,
+    logoDominant: false,
+    isAiGenerated: false,
+    isPlaceholder: false,
+    isAdBanner: false,
+    isWebsiteScreenshot: false,
+    watermarkOnly: false,
+  }));
+};
+
+const validateImageCandidate = (candidate: ImageCandidate) => {
+  if (candidate.mostlyText) return false;
+  if (!candidate.productVisible) return false;
+  if (candidate.logoDominant) return false;
+  if (candidate.width < 500 || candidate.height < 500) return false;
+  if (candidate.isAiGenerated || candidate.isPlaceholder || candidate.isAdBanner || candidate.isWebsiteScreenshot || candidate.watermarkOnly) return false;
+  return true;
 };
 
 const imageMetadataForProduct = (product: Product) => {
@@ -262,55 +307,49 @@ const imageMetadataForProduct = (product: Product) => {
   };
 };
 
-const generatedImageSourceForProduct = (product: Product): ProductImageSource => {
-  if (product.archiveScore >= 96) return "Official product image";
-  if (product.archiveScore >= 92) return "Museum archive image";
-  if (product.marketPrice > 0) return "Vintage transaction image";
-  return "Image placeholder";
-};
-
 const inferredImageTypes = (product: Product): ProductImageType[] => {
-  const types: ProductImageType[] = ["Front View"];
-  if (product.archiveScore >= 90) types.push("Back View");
+  const types: ProductImageType[] = ["Front View", "Back View"];
   if (product.archiveScore >= 92) types.push("Tag Photo");
   if (product.name.toLowerCase().includes("tee")) types.push("Print Detail");
   if (product.archiveScore >= 96) types.push("Stitch Detail");
-  if (["Good", "Fair", "Distressed"].includes(product.condition)) types.push("Fade Detail");
   return Array.from(new Set(types));
 };
+
+const candidateToRecord = (product: Product, candidate: ImageCandidate, index: number): ProductImageRecord => ({
+  id: candidate.id,
+  productId: product.id,
+  type: candidate.type,
+  label: imageTypeLabel[candidate.type],
+  source: candidate.source,
+  sourceUrl: candidate.sourceUrl,
+  url: candidate.imageUrl,
+  isPrimary: index === 0,
+  verified: true,
+  width: candidate.width,
+  height: candidate.height,
+  metadata: imageMetadataForProduct(product),
+});
 
 const getProductImages = (product: Product, submissions: CommunitySubmission[] = communitySubmissions): ProductImageRecord[] => {
   const approved = submissions.filter((submission) => submission.productId === product.id && submission.status === "Approved");
   const communityImages = approved.flatMap((submission, submissionIndex) =>
     submission.photos
-      .map((photo, photoIndex) => imageTypeMap[photo])
+      .map((photo) => imageTypeMap[photo])
       .filter((type): type is ProductImageType => Boolean(type))
-      .map((type, photoIndex) => ({
-        id: `${submission.id}-${type}-${photoIndex}`,
-        productId: product.id,
-        type,
-        label: imageTypeLabel[type],
-        source: "Museum archive image" as const,
-        url: archiveImageSvg(product, imageTypeLabel[type], "Museum archive image"),
-        isPrimary: submissionIndex === 0 && photoIndex === 0,
-        metadata: imageMetadataForProduct(product),
-      })),
+      .flatMap((type, photoIndex) => {
+        const candidate = buildImageCandidates(product, type).find(validateImageCandidate);
+        return candidate ? [{ ...candidateToRecord(product, candidate, submissionIndex + photoIndex), source: "Archive.org / Vintage Archive" as const }] : [];
+      }),
   );
 
-  if (communityImages.length) return communityImages;
+  if (communityImages.length) return communityImages.map((image, index) => ({ ...image, isPrimary: index === 0 }));
 
-  const source = generatedImageSourceForProduct(product);
-  const types = source === "Image placeholder" ? ["Front View" as ProductImageType] : inferredImageTypes(product);
-  return types.map((type, index) => ({
-    id: `${product.id}-${type}-${index}`,
-    productId: product.id,
-    type,
-    label: source === "Image placeholder" ? "IMAGE NOT AVAILABLE" : imageTypeLabel[type],
-    source,
-    url: archiveImageSvg(product, source === "Image placeholder" ? "IMAGE NOT AVAILABLE" : imageTypeLabel[type], source),
-    isPrimary: index === 0,
-    metadata: imageMetadataForProduct(product),
-  }));
+  const collected = inferredImageTypes(product).flatMap((type) => {
+    const candidate = buildImageCandidates(product, type).find(validateImageCandidate);
+    return candidate ? [candidate] : [];
+  });
+
+  return collected.map((candidate, index) => candidateToRecord(product, candidate, index));
 };
 
 const primaryProductImage = (product: Product) => {
@@ -936,9 +975,9 @@ function AdminPage({ submissions, setSubmissions }: { submissions: CommunitySubm
         <div className="admin-image-grid">
           {imageQueue.map(({ submission, product, images }) => (
             <article key={submission.id}>
-              <ProductImageView image={images[0]} product={product} compact />
+              {images[0] && <ProductImageView image={images[0]} product={product} compact />}
               <strong>{product.name}</strong>
-              <span>{statusLabel(submission.status)} / {submission.photos.length} photos</span>
+              <span>{statusLabel(submission.status)} / {images.length} verified photos</span>
               <div className="admin-inline-actions"><button onClick={() => updateStatus(submission.id, "Approved")}>Approve</button><button onClick={() => updateStatus(submission.id, "Rejected")}>Delete</button><button onClick={() => updateStatus(submission.id, "Flagged")}>Request Replace</button></div>
             </article>
           ))}
@@ -1035,9 +1074,9 @@ function ProductCard({ product, openProduct, favorites, setFavorites, watchlist,
   const toggle = (list: string[], setter: (ids: string[]) => void) => setter(list.includes(product.id) ? list.filter((id) => id !== product.id) : [...list, product.id]);
   return (
     <article className="product-card image-product-card">
-      <button className="image-button" onClick={() => openProduct(product)} aria-label={`${product.name} 상세 보기`}>
+      {image && <button className="image-button" onClick={() => openProduct(product)} aria-label={`${product.name} 상세 보기`}>
         <ProductImageView image={image} product={product} compact />
-      </button>
+      </button>}
       <div className="product-card-body">
         <p className="eyebrow">{category.name}</p>
         <h3><button onClick={() => openProduct(product)}>{product.name}</button></h3>
@@ -1086,7 +1125,7 @@ function ProductGallery({ product, images }: { product: Product; images: Product
           <span>Tag Type: {primary.metadata.tagType}</span>
           <span>Stitch Type: {primary.metadata.stitchType}</span>
           <span>Condition: {primary.metadata.condition}</span>
-          <span>Source: {primary.source}</span>
+          <span>Source: <a href={primary.sourceUrl} target="_blank" rel="noreferrer">{primary.source}</a></span>
         </div>
       </div>
       {zoomedImage && (

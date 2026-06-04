@@ -1480,7 +1480,6 @@ body,
   font-size: 0.72rem;
 }
 
-.archive-photo img[alt*="IMAGE NOT AVAILABLE"] + figcaption,
 .archive-photo figcaption span:first-child {
   text-transform: none;
 }
