@@ -31,6 +31,7 @@ import { runDailyArchiveCollection } from "./marketCollector";
 type View =
   | { page: "home" }
   | { page: "search" }
+  | { page: "archive" }
   | { page: "category"; slug: string }
   | { page: "brand"; slug: string }
   | { page: "product"; slug: string }
@@ -49,7 +50,7 @@ const parseHash = (): View => {
   if (parts[0] === "category" && parts[1]) return { page: "category", slug: parts[1] };
   if (parts[0] === "brand" && parts[1]) return { page: "brand", slug: parts[1] };
   if (parts[0] === "product" && parts[1]) return { page: "product", slug: parts[1] };
-  if (["search", "submit", "admin", "rare", "generator", "copyright", "about"].includes(parts[0])) return { page: parts[0] as View["page"] } as View;
+  if (["search", "archive", "submit", "admin", "rare", "generator", "copyright", "about"].includes(parts[0])) return { page: parts[0] as View["page"] } as View;
   return { page: "home" };
 };
 
@@ -98,6 +99,9 @@ const newestValidAdditions = (categoryId?: CategoryId) =>
     .reverse()
     .slice(0, 6);
 
+const categoryRoute = (categoryId: CategoryId) => (categoryId === "designer-archive" ? "designer" : categoryId);
+const normalizeCategorySlug = (slug: string) => (slug === "designer" ? "designer-archive" : slug);
+
 const scrollToPageTop = () => {
   window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "smooth" }));
 };
@@ -112,15 +116,6 @@ function App() {
   const [watchlist, setWatchlist] = useLocalIds("archive-index-watchlist");
   const [recent, setRecent] = useLocalIds("archive-index-recent");
   const [submissions, setSubmissions] = useState<CommunitySubmission[]>(communitySubmissions);
-  const [gridColumns, setGridColumnsState] = useState<2 | 3 | 4>(() => {
-    const saved = Number(localStorage.getItem("archive-grid-columns"));
-    return saved === 2 || saved === 3 || saved === 4 ? saved : 4;
-  });
-
-  const setGridColumns = (columns: 2 | 3 | 4) => {
-    setGridColumnsState(columns);
-    localStorage.setItem("archive-grid-columns", String(columns));
-  };
 
   useEffect(() => {
     const onHash = () => {
@@ -146,7 +141,7 @@ function App() {
     navigate(`/product/${product.slug}`);
   };
 
-  const sharedProps = { navigate, openProduct, favorites, setFavorites, watchlist, setWatchlist, gridColumns, setGridColumns };
+  const sharedProps = { navigate, openProduct, favorites, setFavorites, watchlist, setWatchlist };
 
   return (
     <div className="app-shell">
@@ -154,6 +149,7 @@ function App() {
       <main>
         {view.page === "home" && <HomePage {...sharedProps} recent={recent} query={query} setQuery={setQuery} />}
         {view.page === "search" && <SearchPage {...sharedProps} query={query} setQuery={setQuery} />}
+        {view.page === "archive" && <ArchivePage {...sharedProps} />}
         {view.page === "category" && <CategoryPage {...sharedProps} slug={view.slug} />}
         {view.page === "brand" && <BrandPage {...sharedProps} slug={view.slug} />}
         {view.page === "product" && <ProductPage {...sharedProps} slug={view.slug} submissions={submissions} />}
@@ -241,12 +237,6 @@ function Header({ query, setQuery, navigate }: { query: string; setQuery: (value
 
 function HomePage(props: SharedProps & { recent: string[]; query: string; setQuery: (value: string) => void }) {
   const marketSummary = summarizeMarket(validTransactions);
-  const heroStats = [
-    { label: "Products", value: validProducts.length.toLocaleString() },
-    { label: "Brands", value: visibleBrands.length.toLocaleString() },
-    { label: "Tag Records", value: validTags.length.toLocaleString() },
-    { label: "Market Transactions", value: validTransactions.length.toLocaleString() },
-  ];
   const categoryCounts = categories.map((category) => ({
     category,
     count: validProducts.filter((product) => product.categoryId === category.id).length,
@@ -257,10 +247,6 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
   const recentProducts = props.recent.map((id) => validProducts.find((product) => product.id === id)).filter(Boolean) as Product[];
   const collectionRun = useMemo(() => runDailyArchiveCollection(), []);
 
-  const submitSearch = (event: FormEvent) => {
-    event.preventDefault();
-    props.navigate("/search");
-  };
 
   return (
     <section className="page-stack home-redesign">
@@ -279,30 +265,17 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
           </div>
           <div className="hero-actions">
             <button className="gold-button" onClick={() => props.navigate("/search")}>검색하기</button>
-            <button className="ghost-button" onClick={() => document.getElementById("archive-categories")?.scrollIntoView({ behavior: "smooth", block: "start" })}>아카이브 둘러보기</button>
+            <button className="ghost-button" onClick={() => props.navigate("/archive")}>아카이브 둘러보기</button>
           </div>
-        </div>
-        <div className="hero-stat-grid">
-          {heroStats.map((stat) => <Stat key={stat.label} label={stat.label} value={stat.value} />)}
         </div>
       </section>
 
-      <form className="hero-search panel" onSubmit={submitSearch}>
-        <label htmlFor="home-search">검색</label>
-        <input
-          id="home-search"
-          value={props.query}
-          onChange={(event) => props.setQuery(event.target.value)}
-          placeholder="브랜드, 태그, 연도, 국가, 제품명 검색"
-        />
-        <p>예시: Levi's 501 / Stussy / M-65 / Brockum / 1992 / Raf Simons</p>
-      </form>
 
       <section id="archive-categories" className="category-nav-section panel">
         <SectionTitle eyebrow="Archive Navigation" title="카테고리별 아카이브" />
         <div className="category-grid category-nav-grid">
           {categoryCounts.map(({ category, count }) => (
-            <button className="category-card panel" key={category.id} onClick={() => props.navigate(`/category/${category.slug}`)}>
+            <button className="category-card panel" key={category.id} onClick={() => props.navigate(`/category/${categoryRoute(category.id)}`)}>
               <span className="eyebrow">{count.toLocaleString()}+ 레퍼런스</span>
               <h2>{category.name}</h2>
               <p>{category.description}</p>
@@ -370,6 +343,28 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
   );
 }
 
+function ArchivePage(props: SharedProps) {
+  const latestArchive = newestValidAdditions().slice(0, 12);
+  return (
+    <section className="page-stack archive-page">
+      <PageHero eyebrow="Archive" title="아카이브 둘러보기" description="카테고리별 역사, 태그, 생산 배경, 시장 데이터를 탐색하세요." />
+      <section className="panel category-nav-section">
+        <SectionTitle eyebrow="Categories" title="카테고리" />
+        <div className="category-grid category-nav-grid">
+          {categories.map((category) => (
+            <button className="category-card panel" key={category.id} onClick={() => props.navigate(`/category/${categoryRoute(category.id)}`)}>
+              <span className="eyebrow">{validProducts.filter((product) => product.categoryId === category.id).length.toLocaleString()}+ 레퍼런스</span>
+              <h2>{category.name}</h2>
+              <p>{category.description}</p>
+            </button>
+          ))}
+        </div>
+      </section>
+      <ProductRail title="최근 추가된 아카이브" products={latestArchive} {...props} />
+    </section>
+  );
+}
+
 interface SharedProps {
   navigate: (path: string) => void;
   openProduct: (product: Product) => void;
@@ -377,8 +372,6 @@ interface SharedProps {
   setFavorites: (ids: string[]) => void;
   watchlist: string[];
   setWatchlist: (ids: string[]) => void;
-  gridColumns: 2 | 3 | 4;
-  setGridColumns: (columns: 2 | 3 | 4) => void;
 }
 
 function SearchPage(props: SharedProps & { query: string; setQuery: (value: string) => void }) {
@@ -403,13 +396,13 @@ function SearchPage(props: SharedProps & { query: string; setQuery: (value: stri
         <select value={year} onChange={(event) => setYear(event.target.value)}><option value="All">전체</option>{["194", "195", "196", "197", "198", "199", "200"].map((item) => <option key={item}>{item}0년대</option>)}</select>
         <select value={country} onChange={(event) => setCountry(event.target.value)}><option value="All">전체</option>{Array.from(new Set(validProducts.map((item) => item.country))).map((item) => <option key={item}>{item}</option>)}</select>
       </div>
-      <div className="section-head product-rail-head"><SectionTitle eyebrow="Search Results" title={`${results.length}개 검색 결과`} /><GridToggle gridColumns={props.gridColumns} setGridColumns={props.setGridColumns} /></div><div className={`product-grid grid-${props.gridColumns}`} style={{ gridTemplateColumns: `repeat(${props.gridColumns}, minmax(0, 1fr))` }}>{results.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
+      <div className="section-head product-rail-head"><SectionTitle eyebrow="Search Results" title={`${results.length}개 검색 결과`} /></div><div className="product-grid">{results.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
     </section>
   );
 }
 
 function CategoryPage(props: SharedProps & { slug: string }) {
-  const category = getCategoryBySlug(props.slug) ?? categories[0];
+  const category = getCategoryBySlug(normalizeCategorySlug(props.slug)) ?? categories[0];
   const categoryProducts = validProducts.filter((product) => product.categoryId === category.id);
   const categoryBrands = brands.filter((brand) => brand.categoryId === category.id);
   const [sort, setSort] = useState<SortOption>("Rarity");
@@ -483,7 +476,7 @@ function CategoryPage(props: SharedProps & { slug: string }) {
       <section className="panel">
         <div className="section-head"><div><p className="eyebrow">제품 아카이브</p><h2>{categoryProducts.length.toLocaleString()}개의 인덱스 레퍼런스</h2><p>리서치와 비교에 최적화된 10페이지, 페이지당 30개 제품을 표시합니다.</p></div><select value={sort} onChange={(event) => setSort(event.target.value as SortOption)}>{[{ value: "Year", label: "연도" }, { value: "Price", label: "가격" }, { value: "Popularity", label: "인기도" }, { value: "Rarity", label: "희귀도" }].map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>
         <FilterControls filters={filters} setFilters={setFilters} brands={categoryBrands} />
-        <div className="section-head product-rail-head"><SectionTitle eyebrow="View" title="보기 방식" /><GridToggle gridColumns={props.gridColumns} setGridColumns={props.setGridColumns} /></div><div className={`product-grid dense grid-${props.gridColumns}`} style={{ gridTemplateColumns: `repeat(${props.gridColumns}, minmax(0, 1fr))` }}>{visible.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
+        <div className="product-grid dense">{visible.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
         <Pagination page={page} totalPages={totalPages} setPage={setPage} />
       </section>
     </section>
@@ -738,27 +731,14 @@ function CopyrightPage() {
   );
 }
 
-function ProductRail({ title, products: railProducts, gridColumns, setGridColumns, ...props }: SharedProps & { title: string; products: Product[] }) {
+function ProductRail({ title, products: railProducts, ...props }: SharedProps & { title: string; products: Product[] }) {
   return (
     <section className="panel product-rail">
       <div className="section-head product-rail-head">
         <SectionTitle eyebrow="Archive Index" title={title} />
-        <GridToggle gridColumns={gridColumns} setGridColumns={setGridColumns} />
       </div>
-      <div className={`product-grid grid-${gridColumns}`} style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }}>{railProducts.map((product) => <ProductCard key={product.id} product={product} gridColumns={gridColumns} setGridColumns={setGridColumns} {...props} />)}</div>
+      <div className="product-grid">{railProducts.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
     </section>
-  );
-}
-
-function GridToggle({ gridColumns, setGridColumns }: { gridColumns: 2 | 3 | 4; setGridColumns: (columns: 2 | 3 | 4) => void }) {
-  return (
-    <div className="grid-toggle" aria-label="제품 카드 보기 방식">
-      {[2, 3, 4].map((columns) => (
-        <button key={columns} className={gridColumns === columns ? "active" : ""} onClick={() => setGridColumns(columns as 2 | 3 | 4)}>
-          {columns} Columns
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -946,21 +926,18 @@ function representativeBrandProducts(name: string, productsForBrand: Product[]) 
 }
 
 function BrandTimeline({ events }: { events: BrandTimelineEvent[] }) {
+  if (!events.length) return null;
   return (
     <section className="panel brand-timeline-section">
       <SectionTitle eyebrow="Historic Timeline" title="브랜드 역사 타임라인" />
-      {events.length ? (
-        <div className="brand-timeline-cards">
-          {events.map((event) => (
-            <article key={`${event.year}-${event.title}`} className="brand-timeline-card">
-              <time>{event.year}</time>
-              <div><strong>{event.title}</strong><p>{event.description}</p></div>
-            </article>
-          ))}
-        </div>
-      ) : (
-        <p className="empty-state">Historic Timeline 준비 중입니다.</p>
-      )}
+      <div className="brand-timeline-cards">
+        {events.map((event) => (
+          <article key={`${event.year}-${event.title}`} className="brand-timeline-card">
+            <time>{event.year}</time>
+            <div><strong>{event.title}</strong><p>{event.description}</p></div>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }
