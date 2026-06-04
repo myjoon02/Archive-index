@@ -34,6 +34,7 @@ type View =
   | { page: "archive" }
   | { page: "category"; slug: string }
   | { page: "brand"; slug: string }
+  | { page: "tag"; slug: string }
   | { page: "product"; slug: string }
   | { page: "submit" }
   | { page: "admin" }
@@ -49,6 +50,7 @@ const parseHash = (): View => {
   if (!parts.length) return { page: "home" };
   if (parts[0] === "category" && parts[1]) return { page: "category", slug: parts[1] };
   if (parts[0] === "brand" && parts[1]) return { page: "brand", slug: parts[1] };
+  if (parts[0] === "tag" && parts[1]) return { page: "tag", slug: parts[1] };
   if (parts[0] === "product" && parts[1]) return { page: "product", slug: parts[1] };
   if (["search", "archive", "submit", "admin", "rare", "generator", "copyright", "about"].includes(parts[0])) return { page: parts[0] as View["page"] } as View;
   return { page: "home" };
@@ -76,7 +78,7 @@ const searchValidArchive = (query: string) => {
     .filter((product) => {
       const brand = getBrand(product.brandId);
       const tag = getTag(product.tagId);
-      return [product.name, product.referenceNumber, product.releaseYear, product.country, product.categoryId, brand?.name, tag?.label, tag?.country]
+      return [product.name, product.referenceNumber, product.releaseYear, product.country, product.categoryId, brand?.name, tag?.label, tag?.country, ...generateProductTags(product).map((item) => `${item.label} ${item.group}`)]
         .join(" ")
         .toLowerCase()
         .includes(normalized);
@@ -100,7 +102,7 @@ const newestValidAdditions = (categoryId?: CategoryId) =>
     .slice(0, 6);
 
 type ProductImageType = "Front View" | "Back View" | "Tag Photo" | "Print Detail" | "Stitch Detail" | "Fade Detail" | "Label Detail" | "Packaging";
-type ProductImageSource = "Community uploaded images" | "Archive Index original photography" | "Brand-authorized photography" | "AI-generated reference images";
+type ProductImageSource = "Official product image" | "Museum archive image" | "Vintage transaction image" | "Image placeholder";
 
 interface ProductImageRecord {
   id: string;
@@ -118,6 +120,80 @@ interface ProductImageRecord {
     condition: string;
   };
 }
+
+type TagGroup = "Category" | "Era" | "Construction" | "Country" | "Tag Manufacturer" | "Culture" | "Product Type" | "Brand";
+
+interface ArchiveTag {
+  id: string;
+  label: string;
+  group: TagGroup;
+  description: string;
+}
+
+const normalizeTagId = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+const createArchiveTag = (group: TagGroup, label: string, description?: string): ArchiveTag => ({
+  id: normalizeTagId(label),
+  label,
+  group,
+  description: description ?? `${label} 기준으로 연결된 아카이브 제품입니다.`,
+});
+
+const eraLabel = (year: number) => `${Math.floor(year / 10) * 10}s`;
+const countryTagLabel = (country: string) => {
+  if (country === "United States") return "USA";
+  if (country === "United Kingdom") return "UK";
+  return country;
+};
+
+const productTypeLabel = (product: Product) => {
+  const name = product.name.toLowerCase();
+  if (name.includes("tee")) return "Graphic Tee";
+  if (name.includes("jacket") || name.includes("coat") || name.includes("parka")) return "Jacket";
+  if (name.includes("denim") || name.includes("pant") || name.includes("trouser")) return "Pants";
+  if (name.includes("shirt")) return "Shirt";
+  return "Archive Garment";
+};
+
+const generateProductTags = (product: Product): ArchiveTag[] => {
+  const brand = getBrand(product.brandId);
+  const tag = getTag(product.tagId);
+  const category = getCategory(product.categoryId);
+  const name = product.name.toLowerCase();
+  const generated: ArchiveTag[] = [
+    createArchiveTag("Category", category?.name ?? product.categoryId, "아카이브의 1차 카테고리 분류입니다."),
+    createArchiveTag("Era", eraLabel(product.releaseYear), `${eraLabel(product.releaseYear)} 생산/문화권 제품입니다.`),
+    createArchiveTag("Country", countryTagLabel(product.country), `${product.country} 생산 또는 유통 맥락의 제품입니다.`),
+    createArchiveTag("Brand", brand?.name ?? "Unknown Brand", "브랜드별 제품과 태그를 연결합니다."),
+    createArchiveTag("Product Type", productTypeLabel(product), "제품 형태와 착용/수집 맥락을 기준으로 한 분류입니다."),
+  ];
+
+  if (tag?.stitchType) generated.push(createArchiveTag("Construction", tag.stitchType.replace(" stitch", " Stitch"), "봉제 방식과 생산 시기를 추적하는 구조 태그입니다."));
+  if (name.includes("brockum")) generated.push(createArchiveTag("Tag Manufacturer", "Brockum", "1990년대 밴드 티셔츠에서 자주 확인되는 태그 제조/유통명입니다."));
+  if (name.includes("big e") || brand?.name === "Levi's") generated.push(createArchiveTag("Tag Manufacturer", "Big E", "Levi's 빈티지 데님 판별에서 중요한 탭/라벨 기준입니다."));
+  if (name.includes("selvedge") || name.includes("501")) generated.push(createArchiveTag("Construction", "Selvedge", "셀비지 데님 구조와 생산 연대를 추적하는 태그입니다."));
+  if (product.categoryId === "streetwear" || ["Stussy", "Supreme", "A Bathing Ape"].includes(brand?.name ?? "")) generated.push(createArchiveTag("Culture", "Skateboarding", "스케이트보딩과 스트리트웨어 문화권 제품입니다."));
+  if (product.categoryId === "band-tee") generated.push(createArchiveTag("Culture", "Band Tee", "음악, 투어, 머천다이즈 문화를 기록하는 제품군입니다."));
+  if (product.categoryId === "military") generated.push(createArchiveTag("Culture", "Military", "군납, 서플러스, 유틸리티 디자인 맥락의 제품군입니다."));
+  if (brand?.name === "Stussy") generated.push(createArchiveTag("Culture", "International Stussy Tribe", "Stussy의 글로벌 커뮤니티와 초기 스트리트웨어 네트워크를 가리킵니다."));
+
+  return Array.from(new Map(generated.map((item) => [item.id, item])).values());
+};
+
+const productTagIds = (product: Product) => generateProductTags(product).map((tag) => tag.id);
+const allArchiveTags = Array.from(new Map(validProducts.flatMap(generateProductTags).map((tag) => [tag.id, tag])).values()).sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
+const productsForTag = (tagId: string) => validProducts.filter((product) => productTagIds(product).includes(tagId)).sort((a, b) => b.archiveScore - a.archiveScore);
+const tagBySlug = (slug: string) => allArchiveTags.find((tag) => tag.id === slug);
+const topArchiveTags = allArchiveTags
+  .map((tag) => ({ tag, count: productsForTag(tag.id).length }))
+  .filter((item) => item.count > 0)
+  .sort((a, b) => b.count - a.count)
+  .slice(0, 12);
 
 const imageTypeMap: Record<string, ProductImageType> = {
   "Front View": "Front View",
@@ -186,6 +262,23 @@ const imageMetadataForProduct = (product: Product) => {
   };
 };
 
+const generatedImageSourceForProduct = (product: Product): ProductImageSource => {
+  if (product.archiveScore >= 96) return "Official product image";
+  if (product.archiveScore >= 92) return "Museum archive image";
+  if (product.marketPrice > 0) return "Vintage transaction image";
+  return "Image placeholder";
+};
+
+const inferredImageTypes = (product: Product): ProductImageType[] => {
+  const types: ProductImageType[] = ["Front View"];
+  if (product.archiveScore >= 90) types.push("Back View");
+  if (product.archiveScore >= 92) types.push("Tag Photo");
+  if (product.name.toLowerCase().includes("tee")) types.push("Print Detail");
+  if (product.archiveScore >= 96) types.push("Stitch Detail");
+  if (["Good", "Fair", "Distressed"].includes(product.condition)) types.push("Fade Detail");
+  return Array.from(new Set(types));
+};
+
 const getProductImages = (product: Product, submissions: CommunitySubmission[] = communitySubmissions): ProductImageRecord[] => {
   const approved = submissions.filter((submission) => submission.productId === product.id && submission.status === "Approved");
   const communityImages = approved.flatMap((submission, submissionIndex) =>
@@ -197,8 +290,8 @@ const getProductImages = (product: Product, submissions: CommunitySubmission[] =
         productId: product.id,
         type,
         label: imageTypeLabel[type],
-        source: "Community uploaded images" as const,
-        url: archiveImageSvg(product, imageTypeLabel[type], "Community uploaded images"),
+        source: "Museum archive image" as const,
+        url: archiveImageSvg(product, imageTypeLabel[type], "Museum archive image"),
         isPrimary: submissionIndex === 0 && photoIndex === 0,
         metadata: imageMetadataForProduct(product),
       })),
@@ -206,18 +299,18 @@ const getProductImages = (product: Product, submissions: CommunitySubmission[] =
 
   if (communityImages.length) return communityImages;
 
-  return [
-    {
-      id: `${product.id}-ai-reference`,
-      productId: product.id,
-      type: "Front View",
-      label: "Archive Image Coming Soon",
-      source: "AI-generated reference images",
-      url: archiveImageSvg(product, "Archive Image Coming Soon", "AI-generated reference images"),
-      isPrimary: true,
-      metadata: imageMetadataForProduct(product),
-    },
-  ];
+  const source = generatedImageSourceForProduct(product);
+  const types = source === "Image placeholder" ? ["Front View" as ProductImageType] : inferredImageTypes(product);
+  return types.map((type, index) => ({
+    id: `${product.id}-${type}-${index}`,
+    productId: product.id,
+    type,
+    label: source === "Image placeholder" ? "IMAGE NOT AVAILABLE" : imageTypeLabel[type],
+    source,
+    url: archiveImageSvg(product, source === "Image placeholder" ? "IMAGE NOT AVAILABLE" : imageTypeLabel[type], source),
+    isPrimary: index === 0,
+    metadata: imageMetadataForProduct(product),
+  }));
 };
 
 const primaryProductImage = (product: Product) => {
@@ -278,6 +371,7 @@ function App() {
         {view.page === "archive" && <ArchivePage {...sharedProps} />}
         {view.page === "category" && <CategoryPage {...sharedProps} slug={view.slug} />}
         {view.page === "brand" && <BrandPage {...sharedProps} slug={view.slug} />}
+        {view.page === "tag" && <TagPage {...sharedProps} slug={view.slug} />}
         {view.page === "product" && <ProductPage {...sharedProps} slug={view.slug} submissions={submissions} />}
         {view.page === "submit" && <ContributionPage navigate={navigate} submissions={submissions} setSubmissions={setSubmissions} />}
         {view.page === "admin" && <AdminPage submissions={submissions} setSubmissions={setSubmissions} />}
@@ -369,7 +463,7 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
   }));
   const latestArchive = newestValidAdditions().slice(0, 4);
   const recentSales = validTransactions.slice(-4).reverse();
-  const popularTags = ["Single Stitch", "Big E", "Brockum", "MA-1", "M-65", "Selvedge"];
+  const popularTags = topArchiveTags.slice(0, 8);
   const recentProducts = props.recent.map((id) => validProducts.find((product) => product.id === id)).filter(Boolean) as Product[];
   const collectionRun = useMemo(() => runDailyArchiveCollection(), []);
 
@@ -429,7 +523,7 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
         </div>
         <div className="panel data-list-card tag-cloud-card">
           <SectionTitle eyebrow="Tag Index" title="인기 태그" />
-          <div className="tag-cloud">{popularTags.map((tag) => <button key={tag} onClick={() => { props.setQuery(tag); props.navigate("/search"); }}>{tag}</button>)}</div>
+          <div className="tag-cloud">{popularTags.map(({ tag, count }) => <button key={tag.id} onClick={() => props.navigate(`/tag/${tag.id}`)}>#{tag.label}<span>{count}</span></button>)}</div>
         </div>
       </section>
 
@@ -498,6 +592,40 @@ interface SharedProps {
   setFavorites: (ids: string[]) => void;
   watchlist: string[];
   setWatchlist: (ids: string[]) => void;
+}
+
+
+function TagPage(props: SharedProps & { slug: string }) {
+  const tag = tagBySlug(props.slug);
+  const relatedProducts = tag ? productsForTag(tag.id) : [];
+  return (
+    <section className="page-stack tag-page">
+      <PageHero eyebrow={tag?.group ?? "Tag"} title={tag ? tag.label : "태그를 찾을 수 없습니다"} description={tag?.description ?? "해당 태그와 연결된 아카이브 데이터가 없습니다."} />
+      {tag && (
+        <section className="panel">
+          <div className="section-head"><SectionTitle eyebrow="Related Products" title={`관련 제품 ${relatedProducts.length.toLocaleString()}개`} /></div>
+          <div className="tag-context-card"><strong>{tag.group}</strong><p>{tag.description}</p></div>
+          <div className="product-grid">{relatedProducts.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
+        </section>
+      )}
+    </section>
+  );
+}
+
+function ProductTagList({ product, navigate, limit }: { product: Product; navigate: (path: string) => void; limit?: number }) {
+  const productTags = generateProductTags(product).slice(0, limit ?? 20);
+  if (!productTags.length) return null;
+  return (
+    <div className="product-tag-list">
+      {productTags.map((tag) => <button key={tag.id} onClick={() => navigate(`/tag/${tag.id}`)}>#{tag.label}</button>)}
+    </div>
+  );
+}
+
+function BrandTagCloud({ products, navigate }: { products: Product[]; navigate: (path: string) => void }) {
+  const tagsForBrand = Array.from(new Map(products.flatMap(generateProductTags).map((tag) => [tag.id, tag])).values()).slice(0, 12);
+  if (!tagsForBrand.length) return <p className="empty-state">연결된 태그를 준비 중입니다.</p>;
+  return <div className="tag-cloud brand-tag-cloud">{tagsForBrand.map((tag) => <button key={tag.id} onClick={() => navigate(`/tag/${tag.id}`)}>#{tag.label}<small>{tag.group}</small></button>)}</div>;
 }
 
 function SearchPage(props: SharedProps & { query: string; setQuery: (value: string) => void }) {
@@ -635,6 +763,11 @@ function BrandPage(props: SharedProps & { slug: string }) {
       <BrandTimeline events={profile.timeline} />
 
       <section className="panel">
+        <SectionTitle eyebrow="주요 태그" title={`${brand.name} 연결 태그`} />
+        <BrandTagCloud products={brandProducts} navigate={props.navigate} />
+      </section>
+
+      <section className="panel">
         <SectionTitle eyebrow="대표 아카이브" title={`${brand.name} 주요 레퍼런스`} />
         <div className="representative-archive-list">
           {representativeProducts.map((item) => {
@@ -683,6 +816,7 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
           <h1>{product.name}</h1>
           <p>{product.description}</p>
           <div className="stat-grid compact"><Stat label="출시/생산 연도" value={String(product.releaseYear)} /><Stat label="카테고리" value={category.name} /><Stat label="평균 마켓 가격" value={currency(summary.average || product.marketPrice)} /><Stat label="가격 추세" value={percent(product.priceChangePercent)} tone={product.priceChangePercent >= 0 ? "up" : "down"} /><Stat label="희귀도" value={`${product.rarityScore}/100`} /><Stat label="Archive Score" value={`${product.archiveScore}/100`} /></div>
+          <ProductTagList product={product} navigate={props.navigate} />
           <div className="two-column-copy"><InfoPanel title="역사적 의미" text={product.historicalSignificance} /><InfoPanel title="Cultural impact" text={product.culturalImpact} /><InfoPanel title="생산 디테일" text={product.productionDetails} /><InfoPanel title="Known variants" text={product.knownVariants.join(". ")} /></div>
         </div>
       </div>
@@ -893,7 +1027,7 @@ function ProductRail({ title, products: railProducts, ...props }: SharedProps & 
   );
 }
 
-function ProductCard({ product, openProduct, favorites, setFavorites, watchlist, setWatchlist }: SharedProps & { product: Product }) {
+function ProductCard({ product, openProduct, favorites, setFavorites, watchlist, setWatchlist, navigate }: SharedProps & { product: Product }) {
   const brand = getBrand(product.brandId)!;
   const category = getCategory(product.categoryId)!;
   const image = primaryProductImage(product);
@@ -907,8 +1041,9 @@ function ProductCard({ product, openProduct, favorites, setFavorites, watchlist,
       <div className="product-card-body">
         <p className="eyebrow">{category.name}</p>
         <h3><button onClick={() => openProduct(product)}>{product.name}</button></h3>
+        <p className="product-card-brand">{brand.name}</p>
         <div className="product-card-meta"><span>{product.releaseYear}</span><span>{currency(averagePrice)}</span></div>
-        <div className="pill-row"><span>희귀도 {product.rarityScore}</span><span>Archive Score {product.archiveScore}</span></div>
+        <div className="pill-row"><span>희귀도 {product.rarityScore}</span><span>Archive Score {product.archiveScore}</span></div><ProductTagList product={product} navigate={navigate} limit={5} />
         <div className="card-actions"><button onClick={() => toggle(favorites, setFavorites)}>{favorites.includes(product.id) ? "즐겨찾기됨" : "즐겨찾기"}</button><button onClick={() => toggle(watchlist, setWatchlist)}>{watchlist.includes(product.id) ? "추적 중" : "관심추적"}</button></div>
       </div>
     </article>
