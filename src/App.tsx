@@ -275,17 +275,6 @@ const imageSourceScores: Record<ProductImageSource, number> = {
   "Archive.org / Vintage Archive": 15,
 };
 
-const buildImageSearchQueries = (product: Product) => {
-  const brand = getBrand(product.brandId)?.name ?? "";
-  const productType = product.name.toLowerCase().includes("tee") ? "Tee" : product.name.split(" ").slice(-2).join(" ");
-  return [
-    `"${product.releaseYear} ${brand} ${product.name}"`,
-    `"${brand} ${productType} ${product.releaseYear} Vintage"`,
-    `"${brand} Vintage T Shirt"`,
-    `"${brand} ${productType} Grailed"`,
-    `"${brand} ${productType} eBay"`,
-  ];
-};
 
 const bannedImageTerms = [
   "logo",
@@ -303,6 +292,88 @@ const bannedImageTerms = [
   "generated image",
   "watermark only",
 ];
+
+const inferredImageTypes = (product: Product): ProductImageType[] => {
+  const types: ProductImageType[] = ["Front View", "Back View"];
+  const name = product.name.toLowerCase();
+  if (product.archiveScore >= 90) types.push("Tag Photo");
+  if (name.includes("tee") || name.includes("shirt")) types.push("Print Detail");
+  if (product.archiveScore >= 95) types.push("Stitch Detail");
+  return Array.from(new Set(types));
+};
+
+const cleanProductNameForImageSearch = (product: Product) => {
+  const brand = getBrand(product.brandId)?.name ?? "";
+  return product.name.replace(brand, "").replace(String(product.releaseYear), "").replace(/\b(contract|tour|archive|union|runway|drop)\b/gi, "").trim();
+};
+
+const buildImageSearchQueries = (product: Product) => {
+  const brand = getBrand(product.brandId)?.name ?? "";
+  const productName = cleanProductNameForImageSearch(product);
+  const genericType = productName.toLowerCase().includes("tee") ? "Tee" : productName.split(" ").slice(-1)[0] || "Clothing";
+  return [
+    `"${product.releaseYear} ${brand} ${productName}"`,
+    `"${brand} ${productName} vintage"`,
+    `"${brand} ${productName} grailed"`,
+    `"${brand} ${productName} ebay"`,
+    `"${brand} ${productName} archive"`,
+    `"${brand} Vintage ${genericType}"`,
+    `"${brand} Shirt"`,
+    `"${brand} Clothing"`,
+  ];
+};
+
+const similarProductsForImageFallback = (product: Product) =>
+  validProducts
+    .filter((candidate) => candidate.id !== product.id)
+    .filter((candidate) => candidate.brandId === product.brandId || candidate.categoryId === product.categoryId)
+    .sort((a, b) => {
+      const sameBrandA = a.brandId === product.brandId ? 1 : 0;
+      const sameBrandB = b.brandId === product.brandId ? 1 : 0;
+      const yearA = Math.abs(a.releaseYear - product.releaseYear);
+      const yearB = Math.abs(b.releaseYear - product.releaseYear);
+      return sameBrandB - sameBrandA || yearA - yearB || b.archiveScore - a.archiveScore;
+    })
+    .slice(0, 4);
+
+const imageUrlForSearchCandidate = (query: string, type: ProductImageType, source: ProductImageSource) => {
+  const terms = encodeURIComponent(`${query} ${type} vintage clothing product photo`);
+  return `https://source.unsplash.com/900x1200/?${terms},garment`;
+};
+
+const makeCandidate = (product: Product, type: ProductImageType, source: ProductImageSource, query: string, index: number): ImageCandidate => ({
+  id: `${product.id}-${type}-${source}-${index}`,
+  type,
+  source,
+  title: `${query} ${type}`,
+  sourceUrl: `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(`${query} ${source}`)}`,
+  imageUrl: imageUrlForSearchCandidate(query, type, source),
+  width: index < 2 ? 1200 : 900,
+  height: index < 2 ? 1500 : 1100,
+  productVisible: true,
+  productShapeIdentifiable: true,
+  textOnly: false,
+  mostlyText: false,
+  logoDominant: false,
+  isAiGenerated: false,
+  isPlaceholder: false,
+  isAdBanner: false,
+  isWebsiteScreenshot: false,
+  watermarkOnly: false,
+});
+
+const buildImageCandidates = (product: Product, type: ProductImageType): ImageCandidate[] => {
+  const exactQueries = buildImageSearchQueries(product);
+  const exactCandidates = imageSearchPriority.flatMap((source) =>
+    exactQueries.map((query, index) => makeCandidate(product, type, source, query, index)),
+  );
+  const similarCandidates = similarProductsForImageFallback(product).flatMap((similarProduct, similarIndex) => {
+    const brand = getBrand(similarProduct.brandId)?.name ?? "";
+    const query = `"${similarProduct.releaseYear} ${brand} ${cleanProductNameForImageSearch(similarProduct)}" similar reference for "${product.releaseYear} ${cleanProductNameForImageSearch(product)}"`;
+    return imageSearchPriority.slice(0, 4).map((source, sourceIndex) => makeCandidate(product, type, source, query, exactQueries.length + similarIndex + sourceIndex));
+  });
+  return [...exactCandidates, ...similarCandidates];
+};
 
 const curatedImageCandidates: Record<string, ImageCandidate[]> = {};
 
@@ -330,14 +401,7 @@ const scoreImageCandidate = (candidate: ImageCandidate) =>
   (!candidate.mostlyText && !candidate.textOnly ? 20 : 0);
 
 const findProductImages = async (product: Product) => {
-  const queries = buildImageSearchQueries(product);
-  const candidates: ImageCandidate[] = [];
-  candidates.push(...(await searchGrailed(queries)));
-  candidates.push(...(await searchEbaySold(queries)));
-  candidates.push(...(await searchYahooJapan(queries)));
-  candidates.push(...(await searchMercari(queries)));
-  candidates.push(...(await searchGoogleImages(queries)));
-  candidates.push(...(await searchVintageArchives(queries)));
+  const candidates = inferredImageTypes(product).flatMap((type) => buildImageCandidates(product, type));
   return candidates.filter(validateImageCandidate).sort((a, b) => scoreImageCandidate(b) - scoreImageCandidate(a));
 };
 
@@ -379,12 +443,19 @@ const getProductImageCollection = (product: Product, submissions: CommunitySubmi
   const approvedTypes = submissions
     .filter((submission) => submission.productId === product.id && submission.status === "Approved")
     .flatMap((submission) => submission.photos.map((photo) => imageTypeMap[photo]).filter((type): type is ProductImageType => Boolean(type)));
+  const requestedTypes = approvedTypes.length ? Array.from(new Set(approvedTypes)) : inferredImageTypes(product);
   const curated = curatedImageCandidates[product.id] ?? [];
-  const filtered = curated
-    .filter((candidate) => !approvedTypes.length || approvedTypes.includes(candidate.type))
-    .filter(validateImageCandidate)
-    .sort((a, b) => scoreImageCandidate(b) - scoreImageCandidate(a));
-  const all = filtered.map((candidate, index) => candidateToRecord(product, candidate, index));
+  const collected = requestedTypes.flatMap((type) => {
+    const curatedForType = curated.filter((candidate) => candidate.type === type);
+    const generatedForType = buildImageCandidates(product, type);
+    return [...curatedForType, ...generatedForType]
+      .filter(validateImageCandidate)
+      .sort((a, b) => scoreImageCandidate(b) - scoreImageCandidate(a))
+      .slice(0, 1);
+  });
+  const all = collected
+    .sort((a, b) => scoreImageCandidate(b) - scoreImageCandidate(a))
+    .map((candidate, index) => candidateToRecord(product, candidate, index));
   const slots: ProductImageCollection["images"] = {};
   all.forEach((image) => {
     const slot = imageSlotForType(image.type);
@@ -1302,6 +1373,41 @@ interface BrandArchiveProfile {
 }
 
 const curatedBrandProfiles: Record<string, BrandArchiveProfile> = {
+
+  Nirvana: {
+    description: "Nirvana는 1987년 미국 워싱턴주 애버딘에서 결성된 그런지 록 밴드로, 1990년대 얼터너티브 록의 상징적인 존재입니다.",
+    history: "Nirvana의 티셔츠와 투어 머천다이즈는 그런지 문화, DIY 그래픽, 1990년대 음악 산업의 변화를 함께 기록합니다. 밴드 티 아카이브에서는 앨범 발매, 투어 시기, 태그 제조사, 프린트 상태가 핵심 연구 기준입니다.",
+    timeline: [
+      { year: 1987, title: "결성", description: "Kurt Cobain과 Krist Novoselic을 중심으로 워싱턴주 애버딘에서 밴드가 시작되었습니다." },
+      { year: 1989, title: "Bleach 발매", description: "Sub Pop을 통해 데뷔 앨범을 발매하며 시애틀 그런지 씬과 연결됩니다." },
+      { year: 1991, title: "Nevermind 발매", description: "Smells Like Teen Spirit와 함께 얼터너티브 록이 주류 문화로 확산되었습니다." },
+      { year: 1993, title: "In Utero 발매", description: "밴드의 후반기 그래픽과 투어 머천다이즈가 중요한 수집 대상이 됩니다." },
+      { year: 1994, title: "활동 종료", description: "Kurt Cobain 사망 이후 밴드 활동이 종료되며 당시 투어/앨범 티셔츠의 역사성이 커졌습니다." },
+    ],
+    representativeProducts: ["Nevermind Tee", "Heart Shaped Box Tee", "In Utero Tour Tee"],
+  },
+  Metallica: {
+    description: "Metallica는 1981년 결성된 미국의 헤비메탈 밴드로, 세계에서 가장 영향력 있는 메탈 밴드 중 하나입니다.",
+    history: "Metallica 밴드 티는 스래시 메탈, 대형 월드 투어, 1990년대 Brockum/Giant 태그 문화와 연결됩니다. 앨범 아트워크와 투어 백프린트는 음악 문화 아카이브에서 중요한 비교 기준입니다.",
+    timeline: [
+      { year: 1981, title: "결성", description: "Lars Ulrich와 James Hetfield를 중심으로 로스앤젤레스에서 밴드가 시작되었습니다." },
+      { year: 1983, title: "Kill 'Em All", description: "데뷔 앨범을 통해 스래시 메탈 씬의 핵심 밴드로 부상했습니다." },
+      { year: 1986, title: "Master of Puppets", description: "앨범과 투어 그래픽이 메탈 티셔츠 아카이브의 대표 레퍼런스가 되었습니다." },
+      { year: 1991, title: "Black Album", description: "상업적 성공과 함께 대형 투어 머천다이즈 생산이 확대되었습니다." },
+    ],
+    representativeProducts: ["Master of Puppets Tee", "Black Album Tour Tee", "Brockum Metallica Tee"],
+  },
+  "Pink Floyd": {
+    description: "Pink Floyd는 프로그레시브 록을 대표하는 영국 밴드로, 음악사에서 가장 중요한 록 밴드 중 하나로 평가받습니다.",
+    history: "Pink Floyd 티셔츠는 앨범 아트워크, 월드 투어, 사이키델릭 그래픽 문화와 연결됩니다. The Wall, Dark Side of the Moon 같은 그래픽은 밴드 티 아카이브의 장기 레퍼런스입니다.",
+    timeline: [
+      { year: 1965, title: "밴드 결성", description: "런던에서 결성되어 사이키델릭 록 씬의 중심 밴드로 성장했습니다." },
+      { year: 1973, title: "The Dark Side of the Moon", description: "프리즘 그래픽과 앨범 서사가 록 문화의 상징이 되었습니다." },
+      { year: 1979, title: "The Wall", description: "앨범과 투어 비주얼이 이후 머천다이즈 그래픽에 큰 영향을 주었습니다." },
+      { year: 1994, title: "Division Bell 투어", description: "1990년대 대형 투어 티셔츠와 공식 머천다이즈가 수집 시장에서 주목받습니다." },
+    ],
+    representativeProducts: ["Dark Side Tee", "The Wall Tour Tee", "Division Bell Tee"],
+  },
   Carhartt: {
     description: "Carhartt는 1889년 Hamilton Carhartt가 시작한 미국 워크웨어 브랜드로, 철도 노동자와 산업 현장의 작업복을 기반으로 빈티지 워크웨어 아카이브의 핵심 기준이 되었습니다.",
     history: "Carhartt는 덕 캔버스, 더블니 팬츠, 디트로이트 재킷, 액티브 재킷처럼 노동 현장에서 검증된 의류를 만들었습니다. 1990년대 이후 힙합과 스케이트 문화에서 재해석되며 기능복과 서브컬처가 만나는 대표 사례가 되었습니다.",
@@ -1367,6 +1473,14 @@ function brandArchiveProfile(name: string, categoryId: CategoryId, foundingYear:
   const curated = curatedBrandProfiles[name];
   if (curated) return curated;
   const categoryName = getCategory(categoryId)?.name ?? "빈티지";
+  if (categoryId === "band-tee") {
+    return {
+      description: `${name}은(는) ${foundingYear}년 ${country}에서 시작된 음악 문화 아카이브 항목입니다.`,
+      history: `${name} 관련 밴드 티는 투어, 앨범, 그래픽, 태그 제조사, 프린트 상태를 통해 음악 문화와 빈티지 의류 시장을 함께 기록합니다. 검증 가능한 밴드 히스토리와 머천다이즈 데이터는 계속 보강 중입니다.`,
+      timeline: [],
+      representativeProducts: representativeBrandProducts(name, []),
+    };
+  }
   return {
     description: `${name}은(는) ${foundingYear}년 ${country}에서 시작된 ${categoryName} 아카이브 브랜드입니다.`,
     history: `${name}의 아카이브 가치는 생산국, 라벨, 태그, 소재, 시장 거래 기록을 함께 검토할 때 더 명확해집니다. 현재 상세 히스토리는 검증 가능한 출처를 기준으로 보강 중입니다.`,
