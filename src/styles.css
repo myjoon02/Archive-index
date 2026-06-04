@@ -913,3 +913,148 @@ time {
   }
 }
 
+/* Additional archive UX refinements. */
+.archive-header .brand-mark strong {
+  white-space: nowrap;
+}
+
+.drawer-search {
+  display: grid;
+  gap: 12px;
+  margin: 22px 0;
+  padding: 22px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer-search input {
+  height: 52px;
+  font-size: 15px;
+  border-radius: 14px;
+}
+
+.drawer-search small {
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.product-rail-head {
+  align-items: center;
+}
+
+.grid-toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.grid-toggle button {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: #111316;
+  font-size: 0.78rem;
+}
+
+.grid-toggle button.active {
+  color: var(--text-primary);
+  border-color: rgba(185, 160, 107, 0.55);
+  background: rgba(185, 160, 107, 0.12);
+}
+
+.product-grid.grid-2,
+.product-grid.dense.grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.product-grid.grid-3,
+.product-grid.dense.grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.product-grid.grid-4,
+.product-grid.dense.grid-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.about-card {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: clamp(28px, 6vw, 72px);
+}
+
+.about-card h1 {
+  margin-bottom: 28px;
+}
+
+.about-card p {
+  max-width: 680px;
+  font-size: 1.04rem;
+}
+
+.about-card ul {
+  display: grid;
+  gap: 10px;
+  margin: 28px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.about-card li {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text-primary);
+  background: #111316;
+}
+
+.minimal-footer {
+  justify-content: space-between;
+  color: var(--text-secondary);
+}
+
+.minimal-footer strong {
+  color: var(--text-primary);
+  letter-spacing: 0.14em;
+}
+
+@media (max-width: 980px) {
+  .product-grid.grid-4,
+  .product-grid.dense.grid-4,
+  .product-grid.grid-3,
+  .product-grid.dense.grid-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .archive-header .brand-mark strong {
+    font-size: 0.95rem;
+    letter-spacing: 0.11em;
+  }
+
+  .product-rail-head {
+    gap: 12px;
+  }
+
+  .grid-toggle {
+    justify-content: flex-start;
+  }
+
+  .product-grid.grid-2,
+  .product-grid.grid-3,
+  .product-grid.grid-4,
+  .product-grid.dense.grid-2,
+  .product-grid.dense.grid-3,
+  .product-grid.dense.grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .minimal-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+

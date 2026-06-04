@@ -4,7 +4,6 @@ import {
   archive,
   brands,
   categories,
-  collectorStats,
   communitySubmissions,
   getBrand,
   getBrandBySlug,
@@ -20,7 +19,6 @@ import {
   productTransactions,
   products,
   rareItemRequests,
-  searchArchive,
   summarizeMarket,
   tags,
   timelineEvents,
@@ -42,7 +40,8 @@ type View =
   | { page: "admin" }
   | { page: "rare" }
   | { page: "generator" }
-  | { page: "copyright" };
+  | { page: "copyright" }
+  | { page: "about" };
 
 type SortOption = "Year" | "Price" | "Popularity" | "Rarity";
 
@@ -52,9 +51,52 @@ const parseHash = (): View => {
   if (parts[0] === "category" && parts[1]) return { page: "category", slug: parts[1] };
   if (parts[0] === "brand" && parts[1]) return { page: "brand", slug: parts[1] };
   if (parts[0] === "product" && parts[1]) return { page: "product", slug: parts[1] };
-  if (["search", "submit", "admin", "rare", "generator", "copyright"].includes(parts[0])) return { page: parts[0] as View["page"] } as View;
+  if (["search", "submit", "admin", "rare", "generator", "copyright", "about"].includes(parts[0])) return { page: parts[0] as View["page"] } as View;
   return { page: "home" };
 };
+
+const currentArchiveYear = new Date().getFullYear();
+const invalidTitleKeywords = ["test", "demo", "sample", "placeholder", "unknown"];
+
+const isValidArchiveProduct = (product: Product) => {
+  const normalizedTitle = product.name.toLowerCase();
+  return product.releaseYear <= currentArchiveYear && !invalidTitleKeywords.some((keyword) => normalizedTitle.includes(keyword));
+};
+
+const validProducts = products.filter(isValidArchiveProduct);
+const validProductIds = new Set(validProducts.map((product) => product.id));
+const validTransactions = archive.transactions.filter((transaction) => validProductIds.has(transaction.productId));
+const validTags = tags.filter((tag) => validProductIds.has(tag.productId));
+const visibleBrands = brands.filter((brand) => validProducts.some((product) => product.brandId === brand.id));
+
+const searchValidArchive = (query: string) => {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return validProducts.slice(0, 24);
+  return validProducts
+    .filter((product) => {
+      const brand = getBrand(product.brandId);
+      const tag = getTag(product.tagId);
+      return [product.name, product.referenceNumber, product.releaseYear, product.country, product.categoryId, brand?.name, tag?.label, tag?.country]
+        .join(" ")
+        .toLowerCase()
+        .includes(normalized);
+    })
+    .slice(0, 60);
+};
+
+const topValidMovers = (categoryId?: CategoryId) =>
+  validProducts
+    .filter((product) => !categoryId || product.categoryId === categoryId)
+    .slice()
+    .sort((a, b) => Math.abs(b.priceChangePercent) - Math.abs(a.priceChangePercent))
+    .slice(0, 6);
+
+const newestValidAdditions = (categoryId?: CategoryId) =>
+  validProducts
+    .filter((product) => !categoryId || product.categoryId === categoryId)
+    .slice(-18)
+    .reverse()
+    .slice(0, 6);
 
 const scrollToPageTop = () => {
   window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "smooth" }));
@@ -70,6 +112,15 @@ function App() {
   const [watchlist, setWatchlist] = useLocalIds("archive-index-watchlist");
   const [recent, setRecent] = useLocalIds("archive-index-recent");
   const [submissions, setSubmissions] = useState<CommunitySubmission[]>(communitySubmissions);
+  const [gridColumns, setGridColumnsState] = useState<2 | 3 | 4>(() => {
+    const saved = Number(localStorage.getItem("archiveGridColumns"));
+    return saved === 2 || saved === 3 || saved === 4 ? saved : 4;
+  });
+
+  const setGridColumns = (columns: 2 | 3 | 4) => {
+    setGridColumnsState(columns);
+    localStorage.setItem("archiveGridColumns", String(columns));
+  };
 
   useEffect(() => {
     const onHash = () => {
@@ -95,11 +146,11 @@ function App() {
     navigate(`/product/${product.slug}`);
   };
 
-  const sharedProps = { navigate, openProduct, favorites, setFavorites, watchlist, setWatchlist };
+  const sharedProps = { navigate, openProduct, favorites, setFavorites, watchlist, setWatchlist, gridColumns, setGridColumns };
 
   return (
     <div className="app-shell">
-      <Header navigate={navigate} />
+      <Header query={query} setQuery={setQuery} navigate={navigate} />
       <main>
         {view.page === "home" && <HomePage {...sharedProps} recent={recent} query={query} setQuery={setQuery} />}
         {view.page === "search" && <SearchPage {...sharedProps} query={query} setQuery={setQuery} />}
@@ -111,8 +162,9 @@ function App() {
         {view.page === "rare" && <RareRequestsPage navigate={navigate} />}
         {view.page === "generator" && <ContentGeneratorPage openProduct={openProduct} />}
         {view.page === "copyright" && <CopyrightPage />}
+        {view.page === "about" && <AboutPage />}
       </main>
-      <Footer navigate={navigate} />
+      <Footer />
     </div>
   );
 }
@@ -132,14 +184,13 @@ function useLocalIds(key: string): [string[], (ids: string[]) => void] {
   return [ids, update];
 }
 
-function Header({ navigate }: { navigate: (path: string) => void }) {
+function Header({ query, setQuery, navigate }: { query: string; setQuery: (value: string) => void; navigate: (path: string) => void }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuItems = [
+    { label: "사이트 소개", path: "/about" },
     { label: "아카이브 기여", path: "/submit" },
     { label: "태그 제보", path: "/submit" },
     { label: "시장 데이터 제보", path: "/submit" },
-    { label: "사이트 소개", path: "/" },
-    { label: "후원하기", path: "/rare" },
     { label: "문의하기", path: "/copyright" },
   ];
 
@@ -148,11 +199,16 @@ function Header({ navigate }: { navigate: (path: string) => void }) {
     navigate(path);
   };
 
+  const submitDrawerSearch = (event: FormEvent) => {
+    event.preventDefault();
+    setDrawerOpen(false);
+    navigate("/search");
+  };
+
   return (
     <header className="topbar archive-header">
       <button className="brand-mark" onClick={() => navigate("/")} aria-label="Archive Index home">
-        <span>ARCHIVE</span>
-        <strong>INDEX</strong>
+        <strong>ARCHIVE INDEX</strong>
       </button>
       <button className="menu-button" onClick={() => setDrawerOpen(true)} aria-label="메뉴 열기" aria-expanded={drawerOpen}>
         <span></span>
@@ -165,6 +221,15 @@ function Header({ navigate }: { navigate: (path: string) => void }) {
           <strong>ARCHIVE INDEX</strong>
           <button onClick={() => setDrawerOpen(false)} aria-label="메뉴 닫기">닫기</button>
         </div>
+        <form className="drawer-search" onSubmit={submitDrawerSearch}>
+          <p className="eyebrow">Search Archive</p>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="브랜드, 태그, 연도, 국가, 제품명 검색"
+          />
+          <small>예시: Levi's / M-65 / Brockum / Raf Simons / Stussy / 1992</small>
+        </form>
         <nav className="drawer-menu" aria-label="사이트 메뉴">
           {menuItems.map((item) => (
             <button key={item.label} onClick={() => openMenuItem(item.path)}>{item.label}</button>
@@ -176,22 +241,21 @@ function Header({ navigate }: { navigate: (path: string) => void }) {
 }
 
 function HomePage(props: SharedProps & { recent: string[]; query: string; setQuery: (value: string) => void }) {
-  const marketSummary = summarizeMarket(archive.transactions);
+  const marketSummary = summarizeMarket(validTransactions);
   const heroStats = [
-    { label: "Products", value: products.length.toLocaleString() },
-    { label: "Brands", value: brands.length.toLocaleString() },
-    { label: "Tag Records", value: tags.length.toLocaleString() },
-    { label: "Market Transactions", value: archive.transactions.length.toLocaleString() },
+    { label: "Products", value: validProducts.length.toLocaleString() },
+    { label: "Brands", value: visibleBrands.length.toLocaleString() },
+    { label: "Tag Records", value: validTags.length.toLocaleString() },
+    { label: "Market Transactions", value: validTransactions.length.toLocaleString() },
   ];
   const categoryCounts = categories.map((category) => ({
     category,
-    count: products.filter((product) => product.categoryId === category.id).length,
+    count: validProducts.filter((product) => product.categoryId === category.id).length,
   }));
-  const latestArchive = newestAdditions().slice(0, 4);
-  const recentSales = archive.transactions.slice(-4).reverse();
+  const latestArchive = newestValidAdditions().slice(0, 4);
+  const recentSales = validTransactions.slice(-4).reverse();
   const popularTags = ["Single Stitch", "Big E", "Brockum", "MA-1", "M-65", "Selvedge"];
-  const recentProducts = props.recent.map((id) => products.find((product) => product.id === id)).filter(Boolean) as Product[];
-  const profitLoss = collectorStats.currentValue - collectorStats.purchasePrice;
+  const recentProducts = props.recent.map((id) => validProducts.find((product) => product.id === id)).filter(Boolean) as Product[];
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -209,9 +273,9 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
             Archive Index는 빈티지 의류와 서브컬처의 역사, 태그, 생산 배경, 시장 데이터를 기록하는 오픈 아카이브입니다.
           </p>
           <div className="hero-stat-line">
-            <strong>{products.length.toLocaleString()} Products</strong>
-            <strong>{brands.length.toLocaleString()} Brands</strong>
-            <strong>{tags.length.toLocaleString()} Tag Records</strong>
+            <strong>{validProducts.length.toLocaleString()} Products</strong>
+            <strong>{visibleBrands.length.toLocaleString()} Brands</strong>
+            <strong>{validTags.length.toLocaleString()} Tag Records</strong>
           </div>
           <div className="hero-actions">
             <button className="gold-button" onClick={() => props.navigate("/search")}>검색하기</button>
@@ -260,7 +324,7 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
         <div className="panel data-list-card">
           <SectionTitle eyebrow="Market Feed" title="최근 거래 기록" />
           {recentSales.map((sale) => {
-            const product = products.find((item) => item.id === sale.productId);
+            const product = validProducts.find((item) => item.id === sale.productId);
             return <button key={sale.id} className="data-row" onClick={() => product && props.openProduct(product)}><span>{product?.name}</span><strong>{currency(sale.price)}</strong></button>;
           })}
         </div>
@@ -272,15 +336,6 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
 
       <section className="split-grid">
         <div className="panel">
-          <SectionTitle eyebrow="Collection Tracker" title="개인 보유 가치, 알림, 관심 목록" />
-          <div className="stat-grid compact">
-            <Stat label="현재 가치" value={currency(collectorStats.currentValue)} />
-            <Stat label="구매가" value={currency(collectorStats.purchasePrice)} />
-            <Stat label="손익" value={`${profitLoss >= 0 ? "+" : ""}${currency(profitLoss)}`} tone={profitLoss >= 0 ? "up" : "down"} />
-            <Stat label="보험 평가액" value={currency(collectorStats.insuranceValue)} />
-          </div>
-        </div>
-        <div className="panel">
           <SectionTitle eyebrow="Market Intelligence" title="실거래 기반 아카이브 데이터" />
           <div className="stat-grid compact">
             <Stat label="중앙값" value={currency(marketSummary.median)} />
@@ -289,9 +344,13 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
             <Stat label="스프레드" value={`${marketSummary.spread}%`} />
           </div>
         </div>
+        <div className="panel">
+          <SectionTitle eyebrow="Data Quality" title="검증 규칙이 적용된 아카이브" />
+          <p>미래 연도와 test, demo, sample, placeholder, unknown 키워드가 포함된 제품은 공개 목록에서 자동으로 제외됩니다.</p>
+        </div>
       </section>
 
-      <ProductRail title="가격 변동 상위" products={topMovers()} {...props} />
+      <ProductRail title="가격 변동 상위" products={topValidMovers()} {...props} />
       {!!recentProducts.length && <ProductRail title="최근 본 항목" products={recentProducts} {...props} />}
     </section>
   );
@@ -304,6 +363,8 @@ interface SharedProps {
   setFavorites: (ids: string[]) => void;
   watchlist: string[];
   setWatchlist: (ids: string[]) => void;
+  gridColumns: 2 | 3 | 4;
+  setGridColumns: (columns: 2 | 3 | 4) => void;
 }
 
 function SearchPage(props: SharedProps & { query: string; setQuery: (value: string) => void }) {
@@ -311,7 +372,7 @@ function SearchPage(props: SharedProps & { query: string; setQuery: (value: stri
   const [year, setYear] = useState("All");
   const [country, setCountry] = useState("All");
   const results = useMemo(() => {
-    return searchArchive(props.query).filter((product) => {
+    return searchValidArchive(props.query).filter((product) => {
       const categoryPass = category === "All" || product.categoryId === category;
       const yearPass = year === "All" || String(product.releaseYear).startsWith(year);
       const countryPass = country === "All" || product.country === country;
@@ -326,16 +387,16 @@ function SearchPage(props: SharedProps & { query: string; setQuery: (value: stri
         <input value={props.query} onChange={(event) => props.setQuery(event.target.value)} placeholder="예: Nirvana, Carhartt, 1994, Japan, single stitch, AI-BAN..." />
         <select value={category} onChange={(event) => setCategory(event.target.value)}><option value="All">전체</option>{categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
         <select value={year} onChange={(event) => setYear(event.target.value)}><option value="All">전체</option>{["194", "195", "196", "197", "198", "199", "200"].map((item) => <option key={item}>{item}0년대</option>)}</select>
-        <select value={country} onChange={(event) => setCountry(event.target.value)}><option value="All">전체</option>{Array.from(new Set(products.map((item) => item.country))).map((item) => <option key={item}>{item}</option>)}</select>
+        <select value={country} onChange={(event) => setCountry(event.target.value)}><option value="All">전체</option>{Array.from(new Set(validProducts.map((item) => item.country))).map((item) => <option key={item}>{item}</option>)}</select>
       </div>
-      <div className="product-grid">{results.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
+      <div className="section-head product-rail-head"><SectionTitle eyebrow="Search Results" title={`${results.length}개 검색 결과`} /><GridToggle gridColumns={props.gridColumns} setGridColumns={props.setGridColumns} /></div><div className={`product-grid grid-${props.gridColumns}`}>{results.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
     </section>
   );
 }
 
 function CategoryPage(props: SharedProps & { slug: string }) {
   const category = getCategoryBySlug(props.slug) ?? categories[0];
-  const categoryProducts = products.filter((product) => product.categoryId === category.id);
+  const categoryProducts = validProducts.filter((product) => product.categoryId === category.id);
   const categoryBrands = brands.filter((brand) => brand.categoryId === category.id);
   const [sort, setSort] = useState<SortOption>("Rarity");
   const [page, setPage] = useState(1);
@@ -365,9 +426,9 @@ function CategoryPage(props: SharedProps & { slug: string }) {
   }, [categoryProducts, filters, sort]);
   const visible = filtered.slice((page - 1) * pageSize, page * pageSize);
   const representativeItems = categoryProducts.slice().sort((a, b) => b.rarityScore - a.rarityScore).slice(0, 6);
-  const relatedArchive = newestAdditions(category.id);
+  const relatedArchive = newestValidAdditions(category.id);
   const events = categoryHistoricalEvents(category.id);
-  const summary = summarizeMarket(archive.transactions.filter((sale) => getProduct(sale.productId)?.categoryId === category.id));
+  const summary = summarizeMarket(validTransactions.filter((sale) => getProduct(sale.productId)?.categoryId === category.id));
 
   return (
     <section className="page-stack category-redesign">
@@ -408,7 +469,7 @@ function CategoryPage(props: SharedProps & { slug: string }) {
       <section className="panel">
         <div className="section-head"><div><p className="eyebrow">제품 아카이브</p><h2>{categoryProducts.length.toLocaleString()}개의 인덱스 레퍼런스</h2><p>리서치와 비교에 최적화된 10페이지, 페이지당 30개 제품을 표시합니다.</p></div><select value={sort} onChange={(event) => setSort(event.target.value as SortOption)}>{[{ value: "Year", label: "연도" }, { value: "Price", label: "가격" }, { value: "Popularity", label: "인기도" }, { value: "Rarity", label: "희귀도" }].map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>
         <FilterControls filters={filters} setFilters={setFilters} brands={categoryBrands} />
-        <div className="product-grid dense">{visible.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
+        <div className="section-head product-rail-head"><SectionTitle eyebrow="View" title="보기 방식" /><GridToggle gridColumns={props.gridColumns} setGridColumns={props.setGridColumns} /></div><div className={`product-grid dense grid-${props.gridColumns}`}>{visible.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
         <Pagination page={page} totalPages={totalPages} setPage={setPage} />
       </section>
     </section>
@@ -417,9 +478,9 @@ function CategoryPage(props: SharedProps & { slug: string }) {
 
 function BrandPage(props: SharedProps & { slug: string }) {
   const brand = getBrandBySlug(props.slug) ?? brands[0];
-  const brandProducts = products.filter((product) => product.brandId === brand.id);
+  const brandProducts = validProducts.filter((product) => product.brandId === brand.id);
   const brandTags = tags.filter((tag) => tag.brandId === brand.id);
-  const summary = summarizeMarket(archive.transactions.filter((sale) => getProduct(sale.productId)?.brandId === brand.id));
+  const summary = summarizeMarket(validTransactions.filter((sale) => getProduct(sale.productId)?.brandId === brand.id));
   const events = timelineEvents.filter((event) => event.brandId === brand.id || event.categoryId === brand.categoryId).slice(0, 7);
 
   return (
@@ -442,7 +503,7 @@ function BrandPage(props: SharedProps & { slug: string }) {
 }
 
 function ProductPage(props: SharedProps & { slug: string; submissions: CommunitySubmission[] }) {
-  const product = getProductBySlug(props.slug) ?? products[0];
+  const product = validProducts.find((item) => item.slug === props.slug) ?? validProducts[0];
   const brand = getBrand(product.brandId)!;
   const category = getCategory(product.categoryId)!;
   const tag = getTag(product.tagId)!;
@@ -454,7 +515,7 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
   const history = priceHistory(product, months);
   const analysis = aiMarketAnalysis(product);
   const examples = props.submissions.filter((submission) => submission.productId === product.id && submission.status === "Approved");
-  const related = products.filter((item) => item.categoryId === product.categoryId && item.id !== product.id).slice(0, 8);
+  const related = validProducts.filter((item) => item.categoryId === product.categoryId && item.id !== product.id).slice(0, 8);
 
   return (
     <section className="page-stack">
@@ -503,10 +564,10 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
 
 function ContributionPage({ navigate, submissions, setSubmissions }: { navigate: (path: string) => void; submissions: CommunitySubmission[]; setSubmissions: (items: CommunitySubmission[]) => void }) {
   const [submitted, setSubmitted] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(products[0].id);
+  const [selectedProduct, setSelectedProduct] = useState(validProducts[0].id);
   const [rights, setRights] = useState(false);
   const [photos, setPhotos] = useState(["앞면", "뒷면"]);
-  const product = products.find((item) => item.id === selectedProduct)!;
+  const product = validProducts.find((item) => item.id === selectedProduct)!;
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -533,11 +594,11 @@ function ContributionPage({ navigate, submissions, setSubmissions }: { navigate:
 
   return (
     <section className="page-stack">
-      <PageHero eyebrow="커뮤니티 아카이브 제출" title="마켓플레이스 매물이 아닌, 뮤지엄 스타일 기록을 제출하세요." description="컬렉터, 빈티지 셀러, 애호가는 의류 증거 자료를 제출할 수 있으며, 승인된 제출물만 공개됩니다." />
+      <PageHero eyebrow="Archive Submission" title="아카이브 제출" />
       {submitted && <div className="success-banner panel"><strong>제출이 접수되었습니다.</strong> 상태: 검토 대기. 큐레이터는 승인 전 추가 사진 요청, 중복 병합, 메타데이터 수정을 할 수 있습니다.</div>}
       <form className="panel form-grid" onSubmit={submit}>
         <label>Category<select name="category" defaultValue={product.categoryId}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
-        <label>관련 제품<select value={selectedProduct} onChange={(event) => setSelectedProduct(event.target.value)}>{products.slice(0, 250).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label>관련 제품<select value={selectedProduct} onChange={(event) => setSelectedProduct(event.target.value)}>{validProducts.slice(0, 250).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label>Brand<input name="brand" defaultValue={getBrand(product.brandId)?.name} /></label>
         <label>제품명<input name="productName" defaultValue={product.name} /></label>
         <label>생산 연도<input name="year" type="number" defaultValue={product.releaseYear} /></label>
@@ -564,7 +625,7 @@ function AdminPage({ submissions, setSubmissions }: { submissions: CommunitySubm
   return (
     <section className="page-stack">
       <PageHero eyebrow="아카이브 검토 패널" title="공개 전 커뮤니티 제출 자료를 검토합니다." description="관리자는 승인, 거절, 추가 사진 요청, 중복 항목 병합, 메타데이터 수정을 할 수 있습니다." />
-      <div className="review-list">{submissions.slice(0, 24).map((submission) => { const product = products.find((item) => item.id === submission.productId)!; return <div className="panel review-card" key={submission.id}><div><p className="eyebrow">{statusLabel(submission.status)}</p><h3>{product.name}</h3><p>기여자: {submission.contributor} / {submission.contributionDate}. 권리 동의: {submission.rightsAgreementAt}</p><p>{submission.authenticationNotes}</p></div><div className="review-actions"><button onClick={() => updateStatus(submission.id, "Approved")}>승인</button><button onClick={() => updateStatus(submission.id, "Rejected")}>거절</button><button onClick={() => updateStatus(submission.id, "Flagged")}>추가 사진 요청</button><button>중복 항목 병합</button><button>메타데이터 수정</button></div></div>; })}</div>
+      <div className="review-list">{submissions.slice(0, 24).map((submission) => { const product = validProducts.find((item) => item.id === submission.productId) ?? products.find((item) => item.id === submission.productId)!; return <div className="panel review-card" key={submission.id}><div><p className="eyebrow">{statusLabel(submission.status)}</p><h3>{product.name}</h3><p>기여자: {submission.contributor} / {submission.contributionDate}. 권리 동의: {submission.rightsAgreementAt}</p><p>{submission.authenticationNotes}</p></div><div className="review-actions"><button onClick={() => updateStatus(submission.id, "Approved")}>승인</button><button onClick={() => updateStatus(submission.id, "Rejected")}>거절</button><button onClick={() => updateStatus(submission.id, "Flagged")}>추가 사진 요청</button><button>중복 항목 병합</button><button>메타데이터 수정</button></div></div>; })}</div>
     </section>
   );
 }
@@ -579,9 +640,9 @@ function RareRequestsPage({ navigate }: { navigate: (path: string) => void }) {
 }
 
 function ContentGeneratorPage({ openProduct }: { openProduct: (product: Product) => void }) {
-  const [productId, setProductId] = useState(products[0].id);
+  const [productId, setProductId] = useState(validProducts[0].id);
   const [format, setFormat] = useState("인스타그램 캐러셀");
-  const product = products.find((item) => item.id === productId)!;
+  const product = validProducts.find((item) => item.id === productId)!;
   const brand = getBrand(product.brandId)!;
   const tag = getTag(product.tagId)!;
   const summary = summarizeMarket(productTransactions(product.id));
@@ -597,9 +658,32 @@ function ContentGeneratorPage({ openProduct }: { openProduct: (product: Product)
   return (
     <section className="page-stack">
       <PageHero eyebrow="콘텐츠 생성기" title="아카이브 데이터에서 소셜 콘텐츠와 리서치 산출물을 바로 생성합니다." description="지원 형식: 인스타그램 캐러셀, 인스타그램 스토리, 마켓 리포트, 브랜드 스포트라이트, 태그 아카이브 시리즈." />
-      <div className="panel filter-panel"><select value={productId} onChange={(event) => setProductId(event.target.value)}>{products.slice(0, 300).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><select value={format} onChange={(event) => setFormat(event.target.value)}>{["인스타그램 캐러셀", "인스타그램 스토리", "마켓 리포트", "브랜드 스포트라이트", "태그 아카이브 시리즈"].map((item) => <option key={item}>{item}</option>)}</select><button className="ghost-button" onClick={() => openProduct(product)}>제품 페이지 열기</button></div>
+      <div className="panel filter-panel"><select value={productId} onChange={(event) => setProductId(event.target.value)}>{validProducts.slice(0, 300).map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select><select value={format} onChange={(event) => setFormat(event.target.value)}>{["인스타그램 캐러셀", "인스타그램 스토리", "마켓 리포트", "브랜드 스포트라이트", "태그 아카이브 시리즈"].map((item) => <option key={item}>{item}</option>)}</select><button className="ghost-button" onClick={() => openProduct(product)}>제품 페이지 열기</button></div>
       <div className="slide-grid">{slides.map((slide, index) => <article className="slide-card" key={slide.title}><span>슬라이드 {index + 1}</span><h3>{slide.title}</h3><p>{slide.body}</p></article>)}</div>
       <div className="panel export-panel"><strong>{format} 내보내기</strong><p>내보내기 옵션: PNG, PDF, Canva 호환 형식.</p><div className="hero-actions"><button className="gold-button">PNG 내보내기</button><button className="ghost-button">PDF 내보내기</button><button className="ghost-button">Canva 호환</button></div></div>
+    </section>
+  );
+}
+
+
+function AboutPage() {
+  return (
+    <section className="page-stack about-page">
+      <section className="panel about-card">
+        <p className="eyebrow">About</p>
+        <h1>ARCHIVE INDEX</h1>
+        <p>ARCHIVE INDEX는 빈티지 의류와 서브컬처를 기록하는 오픈 아카이브입니다.</p>
+        <p>우리는 단순한 마켓플레이스가 아닌 역사적 배경, 생산 정보, 태그와 디테일, 문화적 영향, 시장 데이터를 함께 기록합니다.</p>
+        <ul>
+          <li>역사적 배경</li>
+          <li>생산 정보</li>
+          <li>태그와 디테일</li>
+          <li>문화적 영향</li>
+          <li>시장 데이터</li>
+        </ul>
+        <p>밀리터리, 워크웨어, 밴드티, 스트리트웨어, 디자이너 아카이브 분야의 레퍼런스를 장기적으로 축적하는 것이 목표입니다.</p>
+        <p>우리는 빈티지 문화를 박물관, 도서관, 연구 데이터베이스의 관점으로 보존하고 기록합니다.</p>
+      </section>
     </section>
   );
 }
@@ -613,8 +697,28 @@ function CopyrightPage() {
   );
 }
 
-function ProductRail({ title, products: railProducts, ...props }: SharedProps & { title: string; products: Product[] }) {
-  return <section className="panel"><SectionTitle eyebrow="Archive Index" title={title} /><div className="product-grid">{railProducts.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div></section>;
+function ProductRail({ title, products: railProducts, gridColumns, setGridColumns, ...props }: SharedProps & { title: string; products: Product[] }) {
+  return (
+    <section className="panel product-rail">
+      <div className="section-head product-rail-head">
+        <SectionTitle eyebrow="Archive Index" title={title} />
+        <GridToggle gridColumns={gridColumns} setGridColumns={setGridColumns} />
+      </div>
+      <div className={`product-grid grid-${gridColumns}`}>{railProducts.map((product) => <ProductCard key={product.id} product={product} gridColumns={gridColumns} setGridColumns={setGridColumns} {...props} />)}</div>
+    </section>
+  );
+}
+
+function GridToggle({ gridColumns, setGridColumns }: { gridColumns: 2 | 3 | 4; setGridColumns: (columns: 2 | 3 | 4) => void }) {
+  return (
+    <div className="grid-toggle" aria-label="제품 카드 보기 방식">
+      {[2, 3, 4].map((columns) => (
+        <button key={columns} className={gridColumns === columns ? "active" : ""} onClick={() => setGridColumns(columns as 2 | 3 | 4)}>
+          {columns} Columns
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function ProductCard({ product, openProduct, favorites, setFavorites, watchlist, setWatchlist }: SharedProps & { product: Product }) {
@@ -646,7 +750,7 @@ type CategoryFilters = { brand: string; year: string; country: string; condition
 
 function FilterControls({ filters, setFilters, brands }: { filters: CategoryFilters; setFilters: (filters: CategoryFilters) => void; brands: { id: string; name: string }[] }) {
   const update = (key: keyof CategoryFilters, value: string) => setFilters({ ...filters, [key]: value });
-  return <div className="filter-panel nested"><select value={filters.brand} onChange={(event) => update("brand", event.target.value)}><option value="All">전체</option>{brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select><select value={filters.year} onChange={(event) => update("year", event.target.value)}><option value="All">전체</option>{["194", "195", "196", "197", "198", "199", "200"].map((item) => <option key={item} value={item}>{item}0년대</option>)}</select><select value={filters.country} onChange={(event) => update("country", event.target.value)}><option value="All">전체</option>{Array.from(new Set(products.map((item) => item.country))).map((item) => <option key={item}>{item}</option>)}</select><select value={filters.condition} onChange={(event) => update("condition", event.target.value)}><option value="All">전체</option>{["Deadstock", "Excellent", "Very Good", "Good", "Fair", "Distressed"].map((item) => <option key={item}>{item}</option>)}</select><select value={filters.marketplace} onChange={(event) => update("marketplace", event.target.value)}><option value="All">전체</option>{marketplaces.map((item) => <option key={item}>{item}</option>)}</select><select value={filters.price} onChange={(event) => update("price", event.target.value)}><option value="All">전체</option><option>Under $250</option><option>$250-$750</option><option>$750+</option></select></div>;
+  return <div className="filter-panel nested"><select value={filters.brand} onChange={(event) => update("brand", event.target.value)}><option value="All">전체</option>{brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select><select value={filters.year} onChange={(event) => update("year", event.target.value)}><option value="All">전체</option>{["194", "195", "196", "197", "198", "199", "200"].map((item) => <option key={item} value={item}>{item}0년대</option>)}</select><select value={filters.country} onChange={(event) => update("country", event.target.value)}><option value="All">전체</option>{Array.from(new Set(validProducts.map((item) => item.country))).map((item) => <option key={item}>{item}</option>)}</select><select value={filters.condition} onChange={(event) => update("condition", event.target.value)}><option value="All">전체</option>{["Deadstock", "Excellent", "Very Good", "Good", "Fair", "Distressed"].map((item) => <option key={item}>{item}</option>)}</select><select value={filters.marketplace} onChange={(event) => update("marketplace", event.target.value)}><option value="All">전체</option>{marketplaces.map((item) => <option key={item}>{item}</option>)}</select><select value={filters.price} onChange={(event) => update("price", event.target.value)}><option value="All">전체</option><option>Under $250</option><option>$250-$750</option><option>$750+</option></select></div>;
 }
 
 function LineChart({ points, valueKey, label }: { points: { price: number; date: string }[]; valueKey: "price"; label: string }) {
@@ -764,8 +868,8 @@ function badgeLabel(value: string) {
   return { Contributor: "기여자", Collector: "컬렉터", Archivist: "아키비스트", "Expert Archivist": "전문 아키비스트", "Museum Contributor": "뮤지엄 기여자" }[value] ?? value;
 }
 
-function Footer({ navigate }: { navigate: (path: string) => void }) {
-  return <footer className="footer"><div><strong>ARCHIVE INDEX</strong><p>박물관, 도서관, 리서치 데이터베이스가 먼저이고, 마켓 인텔리전스는 그 다음입니다.</p></div><div><button onClick={() => navigate("/submit")}>Contribute</button><button onClick={() => navigate("/admin")}>검토 패널</button><button onClick={() => navigate("/copyright")}>저작권 삭제 요청</button></div></footer>;
+function Footer() {
+  return <footer className="footer minimal-footer"><strong>ARCHIVE INDEX</strong><span>© 2026 ARCHIVE INDEX</span></footer>;
 }
 
 export default App;
