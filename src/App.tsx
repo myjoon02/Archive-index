@@ -324,44 +324,125 @@ const similarProductsForImageFallback = (product: Product) =>
     })
     .slice(0, 4);
 
-const imageUrlForSearchCandidate = (query: string, type: ProductImageType, source: ProductImageSource) => {
-  const terms = encodeURIComponent(`${query} ${type} vintage clothing product photo`);
-  return `https://source.unsplash.com/900x1200/?${terms},garment`;
+const imageKindForType = (type: ProductImageType) => {
+  if (type === "Front View") return "front";
+  if (type === "Back View") return "back";
+  if (type === "Tag Photo") return "tag";
+  return "detail";
 };
 
-const makeCandidate = (product: Product, type: ProductImageType, source: ProductImageSource, query: string, index: number): ImageCandidate => ({
-  id: `${product.id}-${type}-${source}-${index}`,
-  type,
-  source,
-  title: `${query} ${type}`,
-  sourceUrl: `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(`${query} ${source}`)}`,
-  imageUrl: imageUrlForSearchCandidate(query, type, source),
-  width: index < 2 ? 1200 : 900,
-  height: index < 2 ? 1500 : 1100,
-  productVisible: true,
-  productShapeIdentifiable: true,
-  textOnly: false,
-  mostlyText: false,
-  logoDominant: false,
-  isAiGenerated: false,
-  isPlaceholder: false,
-  isAdBanner: false,
-  isWebsiteScreenshot: false,
-  watermarkOnly: false,
-});
-
-const buildImageCandidates = (product: Product, type: ProductImageType): ImageCandidate[] => {
-  const exactQueries = buildImageSearchQueries(product);
-  const exactCandidates = imageSearchPriority.flatMap((source) =>
-    exactQueries.map((query, index) => makeCandidate(product, type, source, query, index)),
-  );
-  const similarCandidates = similarProductsForImageFallback(product).flatMap((similarProduct, similarIndex) => {
-    const brand = getBrand(similarProduct.brandId)?.name ?? "";
-    const query = `"${similarProduct.releaseYear} ${brand} ${cleanProductNameForImageSearch(similarProduct)}" similar reference for "${product.releaseYear} ${cleanProductNameForImageSearch(product)}"`;
-    return imageSearchPriority.slice(0, 4).map((source, sourceIndex) => makeCandidate(product, type, source, query, exactQueries.length + similarIndex + sourceIndex));
-  });
-  return [...exactCandidates, ...similarCandidates];
+const logImageSearch = (status: "SUCCESS" | "FAILED", detail: { product: string; source: ProductImageSource; page?: string; image?: string; reason?: string }) => {
+  const label = status === "SUCCESS" ? "[IMAGE SEARCH]" : "[IMAGE SEARCH FAILED]";
+  console.info(`${label}\nProduct:\n${detail.product}\n\nSource:\n${detail.source}\n\nPage:\n${detail.page ?? "N/A"}\n\nImage Found:\n${detail.image ?? "N/A"}\n\nStatus:\n${status}${detail.reason ? `\n\nReason:\n${detail.reason}` : ""}`);
 };
+
+const sourceSearchUrl = (source: ProductImageSource, query: string) => {
+  const encoded = encodeURIComponent(query.replace(/"/g, ""));
+  if (source === "Grailed") return `https://www.google.com/search?q=${encoded}+grailed`;
+  if (source === "eBay Sold Listings") return `https://www.ebay.com/sch/i.html?_nkw=${encoded}&LH_Sold=1&LH_Complete=1`;
+  if (source === "Yahoo Auctions Japan") return `https://auctions.yahoo.co.jp/search/search?p=${encoded}`;
+  if (source === "Mercari") return `https://jp.mercari.com/search?keyword=${encoded}`;
+  if (source === "Google Images") return `https://www.google.com/search?tbm=isch&q=${encoded}`;
+  return `https://archive.org/search?query=${encoded}`;
+};
+
+const extractProductPageLinks = (html: string, source: ProductImageSource) => {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  const hostMatchers: Record<ProductImageSource, string[]> = {
+    Grailed: ["grailed.com/listings", "grailed.com"],
+    "eBay Sold Listings": ["ebay.com/itm", "ebay.com"],
+    "Yahoo Auctions Japan": ["auctions.yahoo.co.jp", "page.auctions.yahoo.co.jp"],
+    Mercari: ["mercari.com", "jp.mercari.com/item"],
+    "Google Images": [],
+    "Archive.org / Vintage Archive": ["archive.org"],
+  };
+  return Array.from(doc.querySelectorAll<HTMLAnchorElement>("a[href]"))
+    .map((anchor) => anchor.href)
+    .filter((href) => hostMatchers[source].some((matcher) => href.includes(matcher)))
+    .slice(0, 5);
+};
+
+const absoluteUrl = (value: string | null | undefined, baseUrl: string) => {
+  if (!value) return undefined;
+  try {
+    return new URL(value, baseUrl).href;
+  } catch {
+    return undefined;
+  }
+};
+
+const extractImageCandidatesFromProductPage = (html: string, pageUrl: string, source: ProductImageSource, product: Product, type: ProductImageType): ImageCandidate[] => {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  const metaUrls = [
+    doc.querySelector<HTMLMetaElement>('meta[property="og:image"]')?.content,
+    doc.querySelector<HTMLMetaElement>('meta[name="twitter:image"]')?.content,
+  ];
+  const imgUrls = Array.from(doc.querySelectorAll<HTMLImageElement>("picture img, img"))
+    .map((img) => img.currentSrc || img.src || img.getAttribute("data-src") || img.getAttribute("data-original"));
+  const urls = [...metaUrls, ...imgUrls]
+    .map((url) => absoluteUrl(url, pageUrl))
+    .filter((url): url is string => Boolean(url));
+
+  return Array.from(new Set(urls)).map((imageUrl, index) => ({
+    id: `${product.id}-${type}-${source}-${index}`,
+    type,
+    source,
+    title: `${product.name} ${type}`,
+    sourceUrl: pageUrl,
+    imageUrl,
+    width: imageUrl.includes("1000") || imageUrl.includes("1200") ? 1200 : 800,
+    height: imageUrl.includes("1000") || imageUrl.includes("1200") ? 1200 : 1000,
+    productVisible: true,
+    productShapeIdentifiable: true,
+    textOnly: false,
+    mostlyText: false,
+    logoDominant: false,
+    isAiGenerated: false,
+    isPlaceholder: false,
+    isAdBanner: false,
+    isWebsiteScreenshot: false,
+    watermarkOnly: false,
+  }));
+};
+
+const fetchText = async (url: string) => {
+  const response = await fetch(url, { headers: { Accept: "text/html" } });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return response.text();
+};
+
+const collectSourceCandidates = async (product: Product, type: ProductImageType, source: ProductImageSource, queries: string[]) => {
+  const candidates: ImageCandidate[] = [];
+  for (const query of queries) {
+    const searchUrl = sourceSearchUrl(source, query);
+    try {
+      const searchHtml = await fetchText(searchUrl);
+      const productPages = source === "Google Images" ? [searchUrl] : extractProductPageLinks(searchHtml, source);
+      if (!productPages.length) {
+        logImageSearch("FAILED", { product: product.name, source, page: searchUrl, reason: "No Product Page Found" });
+        continue;
+      }
+      for (const pageUrl of productPages) {
+        const pageHtml = source === "Google Images" ? searchHtml : await fetchText(pageUrl);
+        const extracted = extractImageCandidatesFromProductPage(pageHtml, pageUrl, source, product, type).filter(validateImageCandidate);
+        if (extracted.length) {
+          const best = extracted.sort((a, b) => scoreImageCandidate(b) - scoreImageCandidate(a))[0];
+          logImageSearch("SUCCESS", { product: product.name, source, page: pageUrl, image: best.imageUrl });
+          candidates.push(...extracted);
+        } else {
+          logImageSearch("FAILED", { product: product.name, source, page: pageUrl, reason: "No Valid Image Found" });
+        }
+      }
+    } catch (error) {
+      logImageSearch("FAILED", { product: product.name, source, page: searchUrl, reason: error instanceof Error ? error.message : "Fetch Failed" });
+    }
+  }
+  return candidates;
+};
+
+const buildImageCandidates = (_product: Product, _type: ProductImageType): ImageCandidate[] => [];
 
 const curatedImageCandidates: Record<string, ImageCandidate[]> = {};
 
@@ -389,7 +470,13 @@ const scoreImageCandidate = (candidate: ImageCandidate) =>
   (!candidate.mostlyText && !candidate.textOnly ? 20 : 0);
 
 const findProductImages = async (product: Product) => {
-  const candidates = inferredImageTypes(product).flatMap((type) => buildImageCandidates(product, type));
+  const queries = buildImageSearchQueries(product);
+  const candidates: ImageCandidate[] = [];
+  for (const type of inferredImageTypes(product)) {
+    for (const source of imageSearchPriority) {
+      candidates.push(...(await collectSourceCandidates(product, type, source, queries)));
+    }
+  }
   return candidates.filter(validateImageCandidate).sort((a, b) => scoreImageCandidate(b) - scoreImageCandidate(a));
 };
 
@@ -960,7 +1047,8 @@ function BrandPage(props: SharedProps & { slug: string }) {
 }
 
 function ProductPage(props: SharedProps & { slug: string; submissions: CommunitySubmission[] }) {
-  const product = validProducts.find((item) => item.slug === props.slug) ?? validProducts[0];
+  const product = validProducts.find((item) => item.slug === props.slug);
+  if (!product) return <PageHero eyebrow="Product" title="등록된 제품 이미지를 찾을 수 없습니다" description="대표 이미지가 검증된 제품만 아카이브에 등록됩니다." />;
   const brand = getBrand(product.brandId)!;
   const category = getCategory(product.categoryId)!;
   const tag = getTag(product.tagId)!;
@@ -1030,10 +1118,12 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
 
 function ContributionPage({ navigate, submissions, setSubmissions }: { navigate: (path: string) => void; submissions: CommunitySubmission[]; setSubmissions: (items: CommunitySubmission[]) => void }) {
   const [submitted, setSubmitted] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState(validProducts[0].id);
+  const [selectedProduct, setSelectedProduct] = useState(validProducts[0]?.id ?? "");
   const [rights, setRights] = useState(false);
   const [photos, setPhotos] = useState(["앞면", "뒷면"]);
-  const product = validProducts.find((item) => item.id === selectedProduct)!;
+  const product = validProducts.find((item) => item.id === selectedProduct);
+
+  if (!product) return <PageHero eyebrow="Archive Submission" title="아카이브 제출" description="대표 이미지가 검증된 제품만 등록할 수 있습니다." />;
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1125,9 +1215,10 @@ function RareRequestsPage({ navigate }: { navigate: (path: string) => void }) {
 }
 
 function ContentGeneratorPage({ openProduct }: { openProduct: (product: Product) => void }) {
-  const [productId, setProductId] = useState(validProducts[0].id);
+  const [productId, setProductId] = useState(validProducts[0]?.id ?? "");
   const [format, setFormat] = useState("인스타그램 캐러셀");
-  const product = validProducts.find((item) => item.id === productId)!;
+  const product = validProducts.find((item) => item.id === productId);
+  if (!product) return <PageHero eyebrow="콘텐츠 생성기" title="생성 가능한 아카이브 제품이 없습니다" description="대표 이미지가 검증된 제품이 등록되면 콘텐츠를 생성할 수 있습니다." />;
   const brand = getBrand(product.brandId)!;
   const tag = getTag(product.tagId)!;
   const summary = summarizeMarket(productTransactions(product.id));
