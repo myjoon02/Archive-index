@@ -59,6 +59,7 @@ export interface Product {
   tagId: string;
   referenceNumber: string;
   knownVariants: string[];
+  archiveScore: number;
   marketplaceLinks: Record<Marketplace, string>;
 }
 
@@ -256,6 +257,17 @@ export const products: Product[] = brands.flatMap((brand, brandIndex) =>
     const categoryPremium: Record<CategoryId, number> = { military: 130, workwear: 95, "band-tee": 180, streetwear: 210, "designer-archive": 390 };
     const marketPrice = Math.round(120 + (brandIndex % 10) * 48 + productIndex * 24 + categoryPremium[brand.categoryId] + (releaseYear % 31) * 11);
     const rarityScore = Math.min(100, 42 + ((brandIndex * 9 + productIndex * 13) % 58));
+    const archiveScore = Math.min(
+      100,
+      Math.round(
+        24 +
+          (releaseYear >= 1900 && releaseYear <= 2024 ? 24 : 0) +
+          (productIndex % 2 === 0 ? 16 : 10) +
+          (brand.manufacturingCountries[productIndex % brand.manufacturingCountries.length] ? 14 : 0) +
+          (marketPrice > 0 ? 12 : 0) +
+          Math.min(10, Math.round(rarityScore / 10)),
+      ),
+    );
     return {
       id: `${brand.id}-p${productIndex + 1}`,
       slug: slugify(name),
@@ -271,6 +283,7 @@ export const products: Product[] = brands.flatMap((brand, brandIndex) =>
       marketPrice,
       priceChangePercent: Number((((brandIndex * 7 + productIndex * 5) % 35) - 12).toFixed(1)),
       rarityScore,
+      archiveScore,
       popularity: 50 + ((brandIndex * 11 + productIndex * 17) % 50),
       size: sizes[(brandIndex + productIndex) % sizes.length],
       condition: conditions[(brandIndex + productIndex * 2) % conditions.length],
@@ -444,11 +457,3 @@ export const searchArchive = (query: string) => {
   }).slice(0, 60);
 };
 
-export const collectorStats = {
-  currentValue: products.slice(0, 8).reduce((sum, product) => sum + product.marketPrice, 0),
-  purchasePrice: products.slice(0, 8).reduce((sum, product) => sum + Math.round(product.marketPrice * 0.68), 0),
-  insuranceValue: products.slice(0, 8).reduce((sum, product) => sum + Math.round(product.marketPrice * 1.18), 0),
-  watchedItems: 18,
-  savedSearches: 7,
-  marketAlerts: 5,
-};

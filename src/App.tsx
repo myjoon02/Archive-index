@@ -14,21 +14,20 @@ import {
   getTag,
   marketplaceComparison,
   marketplaces,
-  newestAdditions,
-  priceHistory,
   productTransactions,
   products,
   rareItemRequests,
   summarizeMarket,
   tags,
   timelineEvents,
-  topMovers,
   type CategoryId,
   type CommunitySubmission,
   type Marketplace,
+  type MarketTransaction,
   type Product,
   type SubmissionStatus,
 } from "./archiveData";
+import { runDailyArchiveCollection } from "./marketCollector";
 
 type View =
   | { page: "home" }
@@ -55,12 +54,13 @@ const parseHash = (): View => {
   return { page: "home" };
 };
 
-const currentArchiveYear = new Date().getFullYear();
+const minArchiveYear = 1900;
+const maxArchiveYear = 2024;
 const invalidTitleKeywords = ["test", "demo", "sample", "placeholder", "unknown"];
 
 const isValidArchiveProduct = (product: Product) => {
   const normalizedTitle = product.name.toLowerCase();
-  return product.releaseYear <= currentArchiveYear && !invalidTitleKeywords.some((keyword) => normalizedTitle.includes(keyword));
+  return product.releaseYear >= minArchiveYear && product.releaseYear <= maxArchiveYear && !invalidTitleKeywords.some((keyword) => normalizedTitle.includes(keyword));
 };
 
 const validProducts = products.filter(isValidArchiveProduct);
@@ -71,7 +71,7 @@ const visibleBrands = brands.filter((brand) => validProducts.some((product) => p
 
 const searchValidArchive = (query: string) => {
   const normalized = query.trim().toLowerCase();
-  if (!normalized) return validProducts.slice(0, 24);
+  if (!normalized) return validProducts.slice().sort((a, b) => b.archiveScore - a.archiveScore).slice(0, 24);
   return validProducts
     .filter((product) => {
       const brand = getBrand(product.brandId);
@@ -81,6 +81,7 @@ const searchValidArchive = (query: string) => {
         .toLowerCase()
         .includes(normalized);
     })
+    .sort((a, b) => b.archiveScore - a.archiveScore || b.releaseYear - a.releaseYear)
     .slice(0, 60);
 };
 
@@ -188,9 +189,8 @@ function Header({ query, setQuery, navigate }: { query: string; setQuery: (value
   const [drawerOpen, setDrawerOpen] = useState(false);
   const menuItems = [
     { label: "사이트 소개", path: "/about" },
-    { label: "아카이브 기여", path: "/submit" },
+    { label: "아카이브 제보", path: "/submit" },
     { label: "태그 제보", path: "/submit" },
-    { label: "시장 데이터 제보", path: "/submit" },
     { label: "문의하기", path: "/copyright" },
   ];
 
@@ -256,6 +256,7 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
   const recentSales = validTransactions.slice(-4).reverse();
   const popularTags = ["Single Stitch", "Big E", "Brockum", "MA-1", "M-65", "Selvedge"];
   const recentProducts = props.recent.map((id) => validProducts.find((product) => product.id === id)).filter(Boolean) as Product[];
+  const collectionRun = useMemo(() => runDailyArchiveCollection(), []);
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -332,6 +333,20 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
           <SectionTitle eyebrow="Tag Index" title="인기 태그" />
           <div className="tag-cloud">{popularTags.map((tag) => <button key={tag} onClick={() => { props.setQuery(tag); props.navigate("/search"); }}>{tag}</button>)}</div>
         </div>
+      </section>
+
+      <section className="panel collector-status-card">
+        <div className="section-head">
+          <SectionTitle eyebrow="Daily Collection" title="자동 데이터 수집 시스템" />
+          <span className="collector-date">{collectionRun.lastRunDate} / 매일 1회</span>
+        </div>
+        <div className="collector-grid">
+          <Stat label="수집 소스" value={collectionRun.sources.length.toString()} />
+          <Stat label="검증 통과" value={collectionRun.accepted.length.toString()} />
+          <Stat label="검증 제외" value={collectionRun.rejected.length.toString()} />
+          <Stat label="아카이브 기준" value="1900~2024" />
+        </div>
+        <div className="collector-source-row">{collectionRun.sources.map((source) => <span key={source}>{source}</span>)}</div>
       </section>
 
       <section className="split-grid">
@@ -510,9 +525,7 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
   const sales = productTransactions(product.id);
   const summary = summarizeMarket(sales);
   const comparison = marketplaceComparison(sales);
-  const [timeframe, setTimeframe] = useState("3년");
-  const months = { "30일": 1, "90일": 3, "1년": 12, "3년": 36, "5년": 60, "전체 기간": 84 }[timeframe] ?? 36;
-  const history = priceHistory(product, months);
+  const transactionPoints = sales.slice().sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   const analysis = aiMarketAnalysis(product);
   const examples = props.submissions.filter((submission) => submission.productId === product.id && submission.status === "Approved");
   const related = validProducts.filter((item) => item.categoryId === product.categoryId && item.id !== product.id).slice(0, 8);
@@ -531,8 +544,12 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
       </div>
 
       <section className="panel">
-        <div className="section-head"><SectionTitle eyebrow="가격 히스토리" title="인터랙티브 가격 및 거래량 차트" /><div className="segmented">{["30일", "90일", "1년", "3년", "5년", "전체 기간"].map((item) => <button className={timeframe === item ? "active" : ""} onClick={() => setTimeframe(item)} key={item}>{item}</button>)}</div></div>
-        <div className="chart-grid"><LineChart points={history} valueKey="price" label="가격 그래프" /><BarChart points={history} label="거래량 그래프" /></div>
+        <SectionTitle eyebrow="가격 히스토리" title="실거래 기반 가격 기록" />
+        {transactionPoints.length >= 5 ? (
+          <TransactionScatterChart records={transactionPoints} />
+        ) : (
+          <RecentTransactionList records={transactionPoints} />
+        )}
       </section>
 
       <section className="panel">
@@ -672,8 +689,10 @@ function AboutPage() {
       <section className="panel about-card">
         <p className="eyebrow">About</p>
         <h1>ARCHIVE INDEX</h1>
-        <p>ARCHIVE INDEX는 빈티지 의류와 서브컬처를 기록하는 오픈 아카이브입니다.</p>
-        <p>우리는 단순한 마켓플레이스가 아닌 역사적 배경, 생산 정보, 태그와 디테일, 문화적 영향, 시장 데이터를 함께 기록합니다.</p>
+        <p>ARCHIVE INDEX는 단순한 판매 플랫폼이 아닙니다.</p>
+        <p>우리는 빈티지 의류와 서브컬처의 역사, 생산 배경, 태그, 시장 데이터를 기록하는 오픈 아카이브를 구축합니다.</p>
+        <p>수집보다 기록을, 소유보다 보존을, 유행보다 역사성을 중요하게 생각합니다.</p>
+        <p>우리의 목표는 밀리터리, 워크웨어, 밴드 티셔츠, 스트리트웨어, 디자이너 아카이브를 장기적으로 축적하여 연구 가능한 데이터베이스를 만드는 것입니다.</p>
         <ul>
           <li>역사적 배경</li>
           <li>생산 정보</li>
@@ -681,8 +700,6 @@ function AboutPage() {
           <li>문화적 영향</li>
           <li>시장 데이터</li>
         </ul>
-        <p>밀리터리, 워크웨어, 밴드티, 스트리트웨어, 디자이너 아카이브 분야의 레퍼런스를 장기적으로 축적하는 것이 목표입니다.</p>
-        <p>우리는 빈티지 문화를 박물관, 도서관, 연구 데이터베이스의 관점으로 보존하고 기록합니다.</p>
       </section>
     </section>
   );
@@ -728,7 +745,7 @@ function ProductCard({ product, openProduct, favorites, setFavorites, watchlist,
   return (
     <article className="product-card">
       <button className="image-button" onClick={() => openProduct(product)}><ArchiveImage product={product} compact /></button>
-      <div className="product-card-body"><p className="eyebrow">{brand.name} / {category.name}</p><h3><button onClick={() => openProduct(product)}>{product.name}</button></h3><div className="metric-row"><span>{product.releaseYear}</span><strong>{currency(product.marketPrice)}</strong></div><div className="pill-row"><span>희귀도 {product.rarityScore}</span><span className={product.priceChangePercent >= 0 ? "up" : "down"}>{percent(product.priceChangePercent)}</span></div><div className="card-actions"><button onClick={() => toggle(favorites, setFavorites)}>{favorites.includes(product.id) ? "즐겨찾기됨" : "즐겨찾기"}</button><button onClick={() => toggle(watchlist, setWatchlist)}>{watchlist.includes(product.id) ? "추적 중" : "관심추적"}</button></div></div>
+      <div className="product-card-body"><p className="eyebrow">{brand.name} / {category.name}</p><h3><button onClick={() => openProduct(product)}>{product.name}</button></h3><div className="metric-row"><span>{product.releaseYear}</span><strong>{currency(product.marketPrice)}</strong></div><div className="pill-row"><span>Archive Score {product.archiveScore}</span><span>희귀도 {product.rarityScore}</span><span className={product.priceChangePercent >= 0 ? "up" : "down"}>{percent(product.priceChangePercent)}</span></div><div className="card-actions"><button onClick={() => toggle(favorites, setFavorites)}>{favorites.includes(product.id) ? "즐겨찾기됨" : "즐겨찾기"}</button><button onClick={() => toggle(watchlist, setWatchlist)}>{watchlist.includes(product.id) ? "추적 중" : "관심추적"}</button></div></div>
     </article>
   );
 }
@@ -751,6 +768,48 @@ type CategoryFilters = { brand: string; year: string; country: string; condition
 function FilterControls({ filters, setFilters, brands }: { filters: CategoryFilters; setFilters: (filters: CategoryFilters) => void; brands: { id: string; name: string }[] }) {
   const update = (key: keyof CategoryFilters, value: string) => setFilters({ ...filters, [key]: value });
   return <div className="filter-panel nested"><select value={filters.brand} onChange={(event) => update("brand", event.target.value)}><option value="All">전체</option>{brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select><select value={filters.year} onChange={(event) => update("year", event.target.value)}><option value="All">전체</option>{["194", "195", "196", "197", "198", "199", "200"].map((item) => <option key={item} value={item}>{item}0년대</option>)}</select><select value={filters.country} onChange={(event) => update("country", event.target.value)}><option value="All">전체</option>{Array.from(new Set(validProducts.map((item) => item.country))).map((item) => <option key={item}>{item}</option>)}</select><select value={filters.condition} onChange={(event) => update("condition", event.target.value)}><option value="All">전체</option>{["Deadstock", "Excellent", "Very Good", "Good", "Fair", "Distressed"].map((item) => <option key={item}>{item}</option>)}</select><select value={filters.marketplace} onChange={(event) => update("marketplace", event.target.value)}><option value="All">전체</option>{marketplaces.map((item) => <option key={item}>{item}</option>)}</select><select value={filters.price} onChange={(event) => update("price", event.target.value)}><option value="All">전체</option><option>Under $250</option><option>$250-$750</option><option>$750+</option></select></div>;
+}
+
+
+function TransactionScatterChart({ records }: { records: MarketTransaction[] }) {
+  const prices = records.map((record) => record.price);
+  const min = Math.min(...prices);
+  const max = Math.max(...prices);
+  const firstDate = new Date(records[0].date).getTime();
+  const lastDate = new Date(records[records.length - 1].date).getTime();
+  const range = Math.max(1, lastDate - firstDate);
+  const points = records.map((record) => {
+    const x = ((new Date(record.date).getTime() - firstDate) / range) * 88 + 6;
+    const y = 90 - ((record.price - min) / Math.max(1, max - min)) * 74;
+    return { ...record, x, y };
+  });
+
+  return (
+    <div className="transaction-history-grid">
+      <div className="chart-card scatter-chart-card">
+        <p>거래 발생 시점만 표시합니다. 빈 기간은 임의로 연결하지 않습니다.</p>
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="실거래 산점도">
+          {points.map((point) => <circle key={point.id} cx={point.x} cy={point.y} r="2.3" />)}
+        </svg>
+        <div className="metric-row"><span>{records[0].date}</span><strong>{records[records.length - 1].date}</strong></div>
+      </div>
+      <RecentTransactionList records={records.slice(-6)} />
+    </div>
+  );
+}
+
+function RecentTransactionList({ records }: { records: MarketTransaction[] }) {
+  return (
+    <div className="recent-transaction-list">
+      {records.slice().reverse().map((record) => (
+        <a key={record.id} href={record.sourceUrl} target="_blank" rel="noreferrer" className="transaction-row">
+          <span>{record.date.slice(0, 7).replace("-", ".")}</span>
+          <strong>{currency(record.price)}</strong>
+          <small>{record.marketplace}</small>
+        </a>
+      ))}
+    </div>
+  );
 }
 
 function LineChart({ points, valueKey, label }: { points: { price: number; date: string }[]; valueKey: "price"; label: string }) {
