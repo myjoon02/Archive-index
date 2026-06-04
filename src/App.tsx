@@ -553,12 +553,42 @@ const getProductImageCollection = (product: Product, submissions: CommunitySubmi
   };
 };
 
+const cultureBrandGroups = {
+  bandTee: ["Nirvana", "Metallica", "Sonic Youth", "Misfits", "Pink Floyd", "Grateful Dead"],
+  skate: ["Alien Workshop", "Blind", "Santa Cruz", "Powell Peralta", "World Industries"],
+  streetwear: ["Stussy", "Supreme", "A Bathing Ape", "Neighborhood", "WTAPS"],
+  designer: ["Raf Simons", "Helmut Lang", "Maison Margiela", "Undercover", "Number (N)ine"],
+};
+
 const hasRequiredRegistrationData = (product: Product) => {
   const brand = getBrand(product.brandId);
   return Boolean(brand?.name && product.releaseYear && product.name.trim());
 };
 
-const validProducts = baseArchiveProducts.filter(hasRequiredRegistrationData);
+const productQualityScore = (product: Product) => {
+  const hasPhoto = Boolean(getProductImageCollection(product).mainImage);
+  const hasTransactions = archive.transactions.some((transaction) => transaction.productId === product.id);
+  const hasHistory = Boolean(product.historicalSignificance?.trim());
+  const hasTag = Boolean(getTag(product.tagId));
+  const hasCulture = Boolean(product.culturalImpact?.trim());
+  return [hasPhoto, hasTransactions, hasHistory, hasTag, hasCulture].filter(Boolean).length;
+};
+
+const isCultureArchiveProduct = (product: Product) => {
+  const brand = getBrand(product.brandId)?.name ?? "";
+  return (
+    product.categoryId === "band-tee" ||
+    product.categoryId === "designer-archive" ||
+    cultureBrandGroups.skate.includes(brand) ||
+    cultureBrandGroups.streetwear.includes(brand) ||
+    cultureBrandGroups.designer.includes(brand)
+  );
+};
+
+const validProducts = baseArchiveProducts
+  .filter(hasRequiredRegistrationData)
+  .filter((product) => productQualityScore(product) >= 2)
+  .filter(isCultureArchiveProduct);
 const validProductIds = new Set(validProducts.map((product) => product.id));
 const validTransactions = archive.transactions.filter((transaction) => validProductIds.has(transaction.productId));
 const validTags = tags.filter((tag) => validProductIds.has(tag.productId));
@@ -571,6 +601,55 @@ const topArchiveTags = allArchiveTags
   .filter((item) => item.count > 0)
   .sort((a, b) => b.count - a.count)
   .slice(0, 12);
+
+const cultureCollections = [
+  {
+    slug: "band-tee",
+    name: "Band Tee Archive",
+    shortName: "Band Tee",
+    description: "음악, 투어, 앨범 그래픽, 밴드 머천다이즈를 기록하는 문화 아카이브입니다.",
+    categoryId: "band-tee" as CategoryId,
+    brandNames: cultureBrandGroups.bandTee,
+  },
+  {
+    slug: "skate",
+    name: "Skate Archive",
+    shortName: "Skate",
+    description: "스케이트보드 그래픽, 보드 브랜드, 1990년대 숍 문화와 서브컬처를 기록합니다.",
+    categoryId: "streetwear" as CategoryId,
+    brandNames: cultureBrandGroups.skate,
+  },
+  {
+    slug: "streetwear",
+    name: "Streetwear Archive",
+    shortName: "Streetwear",
+    description: "스트리트웨어, 드롭 문화, 로고 그래픽, 도시 서브컬처의 레퍼런스를 축적합니다.",
+    categoryId: "streetwear" as CategoryId,
+    brandNames: cultureBrandGroups.streetwear,
+  },
+  {
+    slug: "designer",
+    name: "Designer Archive",
+    shortName: "Designer",
+    description: "런웨이 시즌, 디자이너 철학, 컬트 컬렉션과 아카이브 피스를 기록합니다.",
+    categoryId: "designer-archive" as CategoryId,
+    brandNames: cultureBrandGroups.designer,
+  },
+];
+
+const cultureCollectionBySlug = (slug: string) => cultureCollections.find((collection) => collection.slug === slug || (slug === "designer-archive" && collection.slug === "designer"));
+const productsForCultureCollection = (slug: string) => {
+  const collection = cultureCollectionBySlug(slug);
+  if (!collection) return [];
+  return validProducts.filter((product) => {
+    const brand = getBrand(product.brandId)?.name ?? "";
+    if (collection.slug === "band-tee") return product.categoryId === "band-tee";
+    if (collection.slug === "skate") return collection.brandNames.includes(brand);
+    if (collection.slug === "streetwear") return collection.brandNames.includes(brand);
+    return product.categoryId === "designer-archive" || collection.brandNames.includes(brand);
+  });
+};
+
 
 const getProductImages = (product: Product, submissions: CommunitySubmission[] = communitySubmissions) => getProductImageCollection(product, submissions).all;
 const primaryProductImage = (product: Product) => getProductImageCollection(product).mainImage;
@@ -714,9 +793,9 @@ function Header({ query, setQuery, navigate }: { query: string; setQuery: (value
 
 function HomePage(props: SharedProps & { recent: string[]; query: string; setQuery: (value: string) => void }) {
   const marketSummary = summarizeMarket(validTransactions);
-  const categoryCounts = categories.map((category) => ({
-    category,
-    count: validProducts.filter((product) => product.categoryId === category.id).length,
+  const categoryCounts = cultureCollections.map((collection) => ({
+    collection,
+    count: productsForCultureCollection(collection.slug).length,
   }));
   const latestArchive = newestValidAdditions().slice(0, 4);
   const recentSales = validTransactions.slice(-4).reverse();
@@ -729,11 +808,11 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
     <section className="page-stack home-redesign">
       <section className="archive-hero panel">
         <div className="archive-hero-copy">
-          <p className="eyebrow">Vintage Archive + Market Intelligence</p>
+          <p className="eyebrow">Subculture / Fashion / Music / Skateboarding</p>
           <h1>ARCHIVE INDEX</h1>
-          <h2>빈티지 문화와 의류의 역사 데이터베이스</h2>
+          <h2>서브컬처 빈티지 아카이브</h2>
           <p>
-            Archive Index는 빈티지 의류와 서브컬처의 역사, 태그, 생산 배경, 시장 데이터를 기록하는 오픈 아카이브입니다.
+            Archive Index는 밴드 티셔츠, 스케이트보드 문화, 스트리트웨어, 디자이너 아카이브를 기록하는 문화 데이터베이스입니다.
           </p>
           <div className="hero-stat-line">
             <strong>{validProducts.length.toLocaleString()} Products</strong>
@@ -751,11 +830,11 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
       <section id="archive-categories" className="category-nav-section panel">
         <SectionTitle eyebrow="Archive Navigation" title="카테고리별 아카이브" />
         <div className="category-grid category-nav-grid">
-          {categoryCounts.map(({ category, count }) => (
-            <button className="category-card panel" key={category.id} onClick={() => props.navigate(`/category/${categoryRoute(category.id)}`)}>
-              <span className="eyebrow">{count.toLocaleString()}+ 레퍼런스</span>
-              <h2>{category.name}</h2>
-              <p>{category.description}</p>
+          {categoryCounts.map(({ collection, count }) => (
+            <button className="category-card panel" key={collection.slug} onClick={() => props.navigate(`/category/${collection.slug}`)}>
+              <span className="eyebrow">{count.toLocaleString()} verified references</span>
+              <h2>{collection.shortName}</h2>
+              <p>{collection.description}</p>
             </button>
           ))}
         </div>
@@ -800,17 +879,16 @@ function HomePage(props: SharedProps & { recent: string[]; query: string; setQue
 
       <section className="split-grid">
         <div className="panel">
-          <SectionTitle eyebrow="Market Intelligence" title="실거래 기반 아카이브 데이터" />
-          <div className="stat-grid compact">
-            <Stat label="중앙값" value={currency(marketSummary.median)} />
-            <Stat label="평균" value={currency(marketSummary.average)} />
-            <Stat label="거래액" value={currency(marketSummary.salesVolume)} />
-            <Stat label="스프레드" value={`${marketSummary.spread}%`} />
-          </div>
+          <SectionTitle eyebrow="Research Notes" title="최근 연구 자료" />
+          <ul className="check-list">
+            <li>1990년대 싱글 스티치 밴드 티셔츠 태그 비교</li>
+            <li>스케이트 브랜드 그래픽과 보드 컬처 아카이브</li>
+            <li>디자이너 아카이브에서 컬렉션 맥락이 갖는 의미</li>
+          </ul>
         </div>
         <div className="panel">
-          <SectionTitle eyebrow="Data Quality" title="검증 규칙이 적용된 아카이브" />
-          <p>미래 연도와 test, demo, sample, placeholder, unknown 키워드가 포함된 제품은 공개 목록에서 자동으로 제외됩니다.</p>
+          <SectionTitle eyebrow="Archive Principle" title="양보다 품질, 자동 생성보다 검증" />
+          <p>제품은 역사성, 문화성, 태그 정보, 거래 이력, 이미지 상태를 함께 검토해 등록됩니다. 시장 데이터는 기록을 보조하는 자료로만 사용됩니다.</p>
         </div>
       </section>
 
@@ -828,11 +906,11 @@ function ArchivePage(props: SharedProps) {
       <section className="panel category-nav-section">
         <SectionTitle eyebrow="Categories" title="카테고리" />
         <div className="category-grid category-nav-grid">
-          {categories.map((category) => (
-            <button className="category-card panel" key={category.id} onClick={() => props.navigate(`/category/${categoryRoute(category.id)}`)}>
-              <span className="eyebrow">{validProducts.filter((product) => product.categoryId === category.id).length.toLocaleString()}+ 레퍼런스</span>
-              <h2>{category.name}</h2>
-              <p>{category.description}</p>
+          {cultureCollections.map((collection) => (
+            <button className="category-card panel" key={collection.slug} onClick={() => props.navigate(`/category/${collection.slug}`)}>
+              <span className="eyebrow">{productsForCultureCollection(collection.slug).length.toLocaleString()} verified references</span>
+              <h2>{collection.name}</h2>
+              <p>{collection.description}</p>
             </button>
           ))}
         </div>
@@ -913,9 +991,10 @@ function SearchPage(props: SharedProps & { query: string; setQuery: (value: stri
 }
 
 function CategoryPage(props: SharedProps & { slug: string }) {
-  const category = getCategoryBySlug(normalizeCategorySlug(props.slug)) ?? categories[0];
-  const categoryProducts = validProducts.filter((product) => product.categoryId === category.id);
-  const categoryBrands = brands.filter((brand) => brand.categoryId === category.id);
+  const collection = cultureCollectionBySlug(props.slug);
+  const category = collection ? getCategory(collection.categoryId)! : getCategoryBySlug(normalizeCategorySlug(props.slug)) ?? categories[0];
+  const categoryProducts = collection ? productsForCultureCollection(collection.slug) : validProducts.filter((product) => product.categoryId === category.id);
+  const categoryBrands = collection ? brands.filter((brand) => collection.brandNames.includes(brand.name) && categoryProducts.some((product) => product.brandId === brand.id)) : brands.filter((brand) => brand.categoryId === category.id);
   const [sort, setSort] = useState<SortOption>("Rarity");
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ brand: "All", year: "All", country: "All", condition: "All", marketplace: "All", price: "All" });
@@ -945,15 +1024,15 @@ function CategoryPage(props: SharedProps & { slug: string }) {
   const visible = filtered.slice((page - 1) * pageSize, page * pageSize);
   const representativeItems = categoryProducts.slice().sort((a, b) => b.rarityScore - a.rarityScore).slice(0, 6);
   const relatedArchive = newestValidAdditions(category.id);
-  const events = categoryHistoricalEvents(category.id);
+  const events = categoryHistoricalEvents(collection?.categoryId ?? category.id);
   const summary = summarizeMarket(validTransactions.filter((sale) => getProduct(sale.productId)?.categoryId === category.id));
 
   return (
     <section className="page-stack category-redesign">
-      <PageHero eyebrow="Category Archive" title={category.name} description={category.description} />
+      <PageHero eyebrow="Culture Archive" title={collection?.name ?? category.name} description={collection?.description ?? category.description} />
 
       <section className="panel category-intro-card">
-        <SectionTitle eyebrow="카테고리 소개" title={`${category.name} 데이터베이스`} />
+        <SectionTitle eyebrow="문화 아카이브" title={`${collection?.shortName ?? category.name} 컬렉션`} />
         <div className="split-grid intro-grid">
           <InfoPanel title="역사적 의미" text={category.historicalSignificance} />
           <InfoPanel title="문화적 영향" text={category.culturalInfluence} />
@@ -1079,20 +1158,6 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
         </div>
       </div>
 
-      <section className="panel">
-        <SectionTitle eyebrow="가격 히스토리" title="실거래 기반 가격 기록" />
-        {transactionPoints.length >= 5 ? (
-          <TransactionScatterChart records={transactionPoints} />
-        ) : (
-          <RecentTransactionList records={transactionPoints} />
-        )}
-      </section>
-
-      <section className="panel">
-        <SectionTitle eyebrow="마켓 인텔리전스" title="다중 마켓 거래 요약" />
-        <div className="stat-grid compact"><Stat label="중앙값 price" value={currency(summary.median)} /><Stat label="평균 price" value={currency(summary.average)} /><Stat label="최고 거래가" value={currency(summary.highest)} /><Stat label="최저 거래가" value={currency(summary.lowest)} /><Stat label="거래액" value={currency(summary.salesVolume)} /><Stat label="거래 수" value={summary.transactionCount.toString()} /><Stat label="변동성" value={String(summary.volatility)} /><Stat label="유동성" value={liquidityLabel(summary.liquidity)} /><Stat label="마켓 스프레드" value={`${summary.spread}%`} /></div>
-        <div className="market-table">{comparison.map((row) => <div key={row.marketplace}><strong>{row.marketplace}</strong><span>{row.count}건 거래</span><span>{row.average ? currency(row.average) : "공개 비교 거래 없음"}</span></div>)}</div>
-      </section>
 
       <section className="split-grid">
         <div className="panel"><SectionTitle eyebrow="AI 마켓 분석" title="빈티지 특화 분석 근거" />{Object.entries(analysis).map(([key, value]) => <p className="analysis-line" key={key}><strong>{labelize(key)}:</strong> {String(value)}</p>)}</div>
@@ -1109,6 +1174,22 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
       <section className="panel">
         <SectionTitle eyebrow="커뮤니티 사례" title="동일 아이템에 대한 승인된 컬렉터 제출 자료" />
         <div className="example-grid">{examples.length ? examples.map((example, index) => <CommunityExample key={example.id} example={example} index={index} />) : <p>아직 승인된 사례가 없습니다. 앞면, 뒷면, 태그, 봉제 디테일 사진을 제출해 이 레퍼런스 기록을 도와주세요.</p>}</div>
+      </section>
+
+
+      <section className="panel">
+        <SectionTitle eyebrow="가격 히스토리" title="실거래 기반 가격 기록" />
+        {transactionPoints.length >= 5 ? (
+          <TransactionScatterChart records={transactionPoints} />
+        ) : (
+          <RecentTransactionList records={transactionPoints} />
+        )}
+      </section>
+
+      <section className="panel">
+        <SectionTitle eyebrow="보조 시장 데이터" title="제품 기록을 보조하는 실거래 참고 정보" />
+        <div className="stat-grid compact"><Stat label="중앙값 price" value={currency(summary.median)} /><Stat label="평균 price" value={currency(summary.average)} /><Stat label="최고 거래가" value={currency(summary.highest)} /><Stat label="최저 거래가" value={currency(summary.lowest)} /><Stat label="거래액" value={currency(summary.salesVolume)} /><Stat label="거래 수" value={summary.transactionCount.toString()} /><Stat label="변동성" value={String(summary.volatility)} /><Stat label="유동성" value={liquidityLabel(summary.liquidity)} /><Stat label="마켓 스프레드" value={`${summary.spread}%`} /></div>
+        <div className="market-table">{comparison.map((row) => <div key={row.marketplace}><strong>{row.marketplace}</strong><span>{row.count}건 거래</span><span>{row.average ? currency(row.average) : "공개 비교 거래 없음"}</span></div>)}</div>
       </section>
 
       <section className="panel">
