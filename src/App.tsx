@@ -226,11 +226,14 @@ interface ImageCandidate {
   id: string;
   type: ProductImageType;
   source: ProductImageSource;
+  title: string;
   sourceUrl: string;
   imageUrl: string;
   width: number;
   height: number;
   productVisible: boolean;
+  productShapeIdentifiable: boolean;
+  textOnly: boolean;
   mostlyText: boolean;
   logoDominant: boolean;
   isAiGenerated: boolean;
@@ -240,60 +243,102 @@ interface ImageCandidate {
   watermarkOnly: boolean;
 }
 
+interface ProductImageCollection {
+  id: string;
+  brand: string;
+  year: number;
+  mainImage?: ProductImageRecord;
+  images: {
+    front?: ProductImageRecord;
+    back?: ProductImageRecord;
+    tag?: ProductImageRecord;
+    detail?: ProductImageRecord;
+  };
+  all: ProductImageRecord[];
+}
+
 const imageSearchPriority: ProductImageSource[] = [
-  "Google Images",
   "Grailed",
   "eBay Sold Listings",
   "Yahoo Auctions Japan",
   "Mercari",
+  "Google Images",
   "Archive.org / Vintage Archive",
 ];
 
+const imageSourceScores: Record<ProductImageSource, number> = {
+  Grailed: 50,
+  "eBay Sold Listings": 40,
+  "Yahoo Auctions Japan": 35,
+  Mercari: 30,
+  "Google Images": 20,
+  "Archive.org / Vintage Archive": 15,
+};
+
 const buildImageSearchQueries = (product: Product) => {
   const brand = getBrand(product.brandId)?.name ?? "";
-  const shortType = product.name.toLowerCase().includes("tee") ? "vintage t-shirt" : "vintage clothing";
+  const productType = product.name.toLowerCase().includes("tee") ? "Tee" : product.name.split(" ").slice(-2).join(" ");
   return [
-    `"${product.name}"`,
-    `"${brand}" "${product.releaseYear}" "${shortType}"`,
-    `"${brand}" "${shortType}" vintage`,
+    `"${product.releaseYear} ${brand} ${product.name}"`,
+    `"${brand} ${productType} ${product.releaseYear} Vintage"`,
+    `"${brand} Vintage T Shirt"`,
+    `"${brand} ${productType} Grailed"`,
+    `"${brand} ${productType} eBay"`,
   ];
 };
 
-const candidateImageUrl = (product: Product, type: ProductImageType, source: ProductImageSource) => {
-  const seed = encodeURIComponent(`${product.name}-${type}-${source}`);
-  // External, non-marketplace placeholder service is used only as a deterministic URL stand-in for validated candidates.
-  // The validator below rejects placeholder/AI/text/logo candidates before they can render.
-  return `https://images.unsplash.com/800x1000/?${seed},vintage,clothing,garment`;
-};
+const bannedImageTerms = [
+  "logo",
+  "brand logo",
+  "banner",
+  "advertisement",
+  "placeholder",
+  "no image",
+  "no-image",
+  "image not available",
+  "coming soon",
+  "screenshot",
+  "screen shot",
+  "ai generated",
+  "generated image",
+  "watermark only",
+];
 
-const buildImageCandidates = (product: Product, type: ProductImageType): ImageCandidate[] => {
-  const queries = buildImageSearchQueries(product);
-  return imageSearchPriority.map((source, index) => ({
-    id: `${product.id}-${type}-${source}`,
-    type,
-    source,
-    sourceUrl: `https://www.google.com/search?tbm=isch&q=${encodeURIComponent(queries[Math.min(index, queries.length - 1)] + " " + source)}`,
-    imageUrl: candidateImageUrl(product, type, source),
-    width: 800,
-    height: 1000,
-    productVisible: true,
-    mostlyText: false,
-    logoDominant: false,
-    isAiGenerated: false,
-    isPlaceholder: false,
-    isAdBanner: false,
-    isWebsiteScreenshot: false,
-    watermarkOnly: false,
-  }));
-};
+const curatedImageCandidates: Record<string, ImageCandidate[]> = {};
+
+const searchGrailed = async (_queries: string[]) => [] as ImageCandidate[];
+const searchEbaySold = async (_queries: string[]) => [] as ImageCandidate[];
+const searchYahooJapan = async (_queries: string[]) => [] as ImageCandidate[];
+const searchMercari = async (_queries: string[]) => [] as ImageCandidate[];
+const searchGoogleImages = async (_queries: string[]) => [] as ImageCandidate[];
+const searchVintageArchives = async (_queries: string[]) => [] as ImageCandidate[];
 
 const validateImageCandidate = (candidate: ImageCandidate) => {
-  if (candidate.mostlyText) return false;
-  if (!candidate.productVisible) return false;
-  if (candidate.logoDominant) return false;
-  if (candidate.width < 500 || candidate.height < 500) return false;
+  const haystack = `${candidate.title} ${candidate.imageUrl} ${candidate.sourceUrl}`.toLowerCase();
+  if (bannedImageTerms.some((term) => haystack.includes(term))) return false;
+  if (candidate.width < 300 || candidate.height < 300) return false;
+  if (!candidate.productVisible || !candidate.productShapeIdentifiable) return false;
+  if (candidate.textOnly || candidate.mostlyText || candidate.logoDominant) return false;
   if (candidate.isAiGenerated || candidate.isPlaceholder || candidate.isAdBanner || candidate.isWebsiteScreenshot || candidate.watermarkOnly) return false;
   return true;
+};
+
+const scoreImageCandidate = (candidate: ImageCandidate) =>
+  imageSourceScores[candidate.source] +
+  (candidate.width >= 1000 || candidate.height >= 1000 ? 20 : 0) +
+  (candidate.productVisible ? 30 : 0) +
+  (!candidate.mostlyText && !candidate.textOnly ? 20 : 0);
+
+const findProductImages = async (product: Product) => {
+  const queries = buildImageSearchQueries(product);
+  const candidates: ImageCandidate[] = [];
+  candidates.push(...(await searchGrailed(queries)));
+  candidates.push(...(await searchEbaySold(queries)));
+  candidates.push(...(await searchYahooJapan(queries)));
+  candidates.push(...(await searchMercari(queries)));
+  candidates.push(...(await searchGoogleImages(queries)));
+  candidates.push(...(await searchVintageArchives(queries)));
+  return candidates.filter(validateImageCandidate).sort((a, b) => scoreImageCandidate(b) - scoreImageCandidate(a));
 };
 
 const imageMetadataForProduct = (product: Product) => {
@@ -307,12 +352,11 @@ const imageMetadataForProduct = (product: Product) => {
   };
 };
 
-const inferredImageTypes = (product: Product): ProductImageType[] => {
-  const types: ProductImageType[] = ["Front View", "Back View"];
-  if (product.archiveScore >= 92) types.push("Tag Photo");
-  if (product.name.toLowerCase().includes("tee")) types.push("Print Detail");
-  if (product.archiveScore >= 96) types.push("Stitch Detail");
-  return Array.from(new Set(types));
+const imageSlotForType = (type: ProductImageType): keyof ProductImageCollection["images"] => {
+  if (type === "Front View") return "front";
+  if (type === "Back View") return "back";
+  if (type === "Tag Photo") return "tag";
+  return "detail";
 };
 
 const candidateToRecord = (product: Product, candidate: ImageCandidate, index: number): ProductImageRecord => ({
@@ -330,32 +374,34 @@ const candidateToRecord = (product: Product, candidate: ImageCandidate, index: n
   metadata: imageMetadataForProduct(product),
 });
 
-const getProductImages = (product: Product, submissions: CommunitySubmission[] = communitySubmissions): ProductImageRecord[] => {
-  const approved = submissions.filter((submission) => submission.productId === product.id && submission.status === "Approved");
-  const communityImages = approved.flatMap((submission, submissionIndex) =>
-    submission.photos
-      .map((photo) => imageTypeMap[photo])
-      .filter((type): type is ProductImageType => Boolean(type))
-      .flatMap((type, photoIndex) => {
-        const candidate = buildImageCandidates(product, type).find(validateImageCandidate);
-        return candidate ? [{ ...candidateToRecord(product, candidate, submissionIndex + photoIndex), source: "Archive.org / Vintage Archive" as const }] : [];
-      }),
-  );
-
-  if (communityImages.length) return communityImages.map((image, index) => ({ ...image, isPrimary: index === 0 }));
-
-  const collected = inferredImageTypes(product).flatMap((type) => {
-    const candidate = buildImageCandidates(product, type).find(validateImageCandidate);
-    return candidate ? [candidate] : [];
+const getProductImageCollection = (product: Product, submissions: CommunitySubmission[] = communitySubmissions): ProductImageCollection => {
+  const brand = getBrand(product.brandId)?.name ?? "";
+  const approvedTypes = submissions
+    .filter((submission) => submission.productId === product.id && submission.status === "Approved")
+    .flatMap((submission) => submission.photos.map((photo) => imageTypeMap[photo]).filter((type): type is ProductImageType => Boolean(type)));
+  const curated = curatedImageCandidates[product.id] ?? [];
+  const filtered = curated
+    .filter((candidate) => !approvedTypes.length || approvedTypes.includes(candidate.type))
+    .filter(validateImageCandidate)
+    .sort((a, b) => scoreImageCandidate(b) - scoreImageCandidate(a));
+  const all = filtered.map((candidate, index) => candidateToRecord(product, candidate, index));
+  const slots: ProductImageCollection["images"] = {};
+  all.forEach((image) => {
+    const slot = imageSlotForType(image.type);
+    if (!slots[slot]) slots[slot] = image;
   });
-
-  return collected.map((candidate, index) => candidateToRecord(product, candidate, index));
+  return {
+    id: product.id,
+    brand,
+    year: product.releaseYear,
+    mainImage: all[0],
+    images: slots,
+    all,
+  };
 };
 
-const primaryProductImage = (product: Product) => {
-  const images = getProductImages(product);
-  return images.find((image) => image.isPrimary) ?? images[0];
-};
+const getProductImages = (product: Product, submissions: CommunitySubmission[] = communitySubmissions) => getProductImageCollection(product, submissions).all;
+const primaryProductImage = (product: Product) => getProductImageCollection(product).mainImage;
 
 const categoryRoute = (categoryId: CategoryId) => (categoryId === "designer-archive" ? "designer" : categoryId);
 const normalizeCategorySlug = (slug: string) => (slug === "designer" ? "designer-archive" : slug);
@@ -849,7 +895,7 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
   return (
     <section className="page-stack">
       <div className="product-layout product-gallery-layout">
-        <div className="panel sticky-panel gallery-panel"><ProductGallery product={product} images={productImages} /></div>
+        {productImages.length > 0 && <div className="panel sticky-panel gallery-panel"><ProductGallery product={product} images={productImages} /></div>}
         <div className="product-main panel">
           <p className="eyebrow">{category.name} / {product.referenceNumber}</p>
           <h1>{product.name}</h1>
@@ -975,7 +1021,7 @@ function AdminPage({ submissions, setSubmissions }: { submissions: CommunitySubm
         <div className="admin-image-grid">
           {imageQueue.map(({ submission, product, images }) => (
             <article key={submission.id}>
-              {images[0] && <ProductImageView image={images[0]} product={product} compact />}
+              {images[0] ? <ProductImageView image={images[0]} product={product} compact /> : <ProductImageUnavailable product={product} compact />}
               <strong>{product.name}</strong>
               <span>{statusLabel(submission.status)} / {images.length} verified photos</span>
               <div className="admin-inline-actions"><button onClick={() => updateStatus(submission.id, "Approved")}>Approve</button><button onClick={() => updateStatus(submission.id, "Rejected")}>Delete</button><button onClick={() => updateStatus(submission.id, "Flagged")}>Request Replace</button></div>
@@ -1074,9 +1120,9 @@ function ProductCard({ product, openProduct, favorites, setFavorites, watchlist,
   const toggle = (list: string[], setter: (ids: string[]) => void) => setter(list.includes(product.id) ? list.filter((id) => id !== product.id) : [...list, product.id]);
   return (
     <article className="product-card image-product-card">
-      {image && <button className="image-button" onClick={() => openProduct(product)} aria-label={`${product.name} 상세 보기`}>
+      {image ? <button className="image-button" onClick={() => openProduct(product)} aria-label={`${product.name} 상세 보기`}>
         <ProductImageView image={image} product={product} compact />
-      </button>}
+      </button> : <button className="image-button" onClick={() => openProduct(product)} aria-label={`${product.name} 상세 보기`}><ProductImageUnavailable product={product} /></button>}
       <div className="product-card-body">
         <p className="eyebrow">{category.name}</p>
         <h3><button onClick={() => openProduct(product)}>{product.name}</button></h3>
@@ -1136,6 +1182,16 @@ function ProductGallery({ product, images }: { product: Product; images: Product
         </div>
       )}
     </section>
+  );
+}
+
+
+function ProductImageUnavailable({ product, compact = false }: { product: Product; compact?: boolean }) {
+  return (
+    <div className={`image-unavailable ${compact ? "compact" : ""}`}>
+      <span>Image Not Available</span>
+      <small>{getBrand(product.brandId)?.name} / {product.releaseYear}</small>
+    </div>
   );
 }
 
