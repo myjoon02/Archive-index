@@ -56,26 +56,38 @@ const parseHash = (): View => {
   return { page: "home" };
 };
 
+const scrollToPageTop = () => {
+  window.requestAnimationFrame(() => window.scrollTo({ top: 0, left: 0, behavior: "smooth" }));
+};
+
 const currency = (value: number) => `$${value.toLocaleString()}`;
 const percent = (value: number) => `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 
 function App() {
   const [view, setView] = useState<View>(parseHash);
   const [query, setQuery] = useState("");
-  const [favorites, set즐겨찾기s] = useLocalIds("archive-index-favorites");
-  const [watchlist, set관심추적list] = useLocalIds("archive-index-watchlist");
+  const [favorites, setFavorites] = useLocalIds("archive-index-favorites");
+  const [watchlist, setWatchlist] = useLocalIds("archive-index-watchlist");
   const [recent, setRecent] = useLocalIds("archive-index-recent");
   const [submissions, setSubmissions] = useState<CommunitySubmission[]>(communitySubmissions);
 
   useEffect(() => {
-    const onHash = () => setView(parseHash());
+    const onHash = () => {
+      setView(parseHash());
+      scrollToPageTop();
+    };
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
 
   const navigate = (path: string) => {
-    window.location.hash = path === "/" ? "" : path;
-    setView(parseHash());
+    const nextHash = path === "/" ? "" : path;
+    if (window.location.hash === `#${nextHash}` || (!nextHash && !window.location.hash)) {
+      setView(parseHash());
+      scrollToPageTop();
+      return;
+    }
+    window.location.hash = nextHash;
   };
 
   const openProduct = (product: Product) => {
@@ -88,7 +100,7 @@ function App() {
     navigate("/search");
   };
 
-  const sharedProps = { navigate, openProduct, favorites, set즐겨찾기s, watchlist, set관심추적list };
+  const sharedProps = { navigate, openProduct, favorites, setFavorites, watchlist, setWatchlist };
 
   return (
     <div className="app-shell">
@@ -148,7 +160,7 @@ function Header({ query, setQuery, onSubmit, navigate }: { query: string; setQue
 function HomePage(props: SharedProps & { recent: string[] }) {
   const marketSummary = summarizeMarket(archive.transactions);
   const featured = products.slice(0, 8);
-  const recent제품 = props.recent.map((id) => products.find((product) => product.id === id)).filter(Boolean) as Product[];
+  const recentProducts = props.recent.map((id) => products.find((product) => product.id === id)).filter(Boolean) as Product[];
   const profitLoss = collectorStats.currentValue - collectorStats.purchasePrice;
 
   return (
@@ -210,7 +222,7 @@ function HomePage(props: SharedProps & { recent: string[] }) {
 
       <ProductRail title="가격 변동 상위" products={topMovers()} {...props} />
       <ProductRail title="주요 신규 아카이브" products={featured} {...props} />
-      {!!recent제품.length && <ProductRail title="최근 본 항목" products={recent제품} {...props} />}
+      {!!recentProducts.length && <ProductRail title="최근 본 항목" products={recentProducts} {...props} />}
     </section>
   );
 }
@@ -219,9 +231,9 @@ interface SharedProps {
   navigate: (path: string) => void;
   openProduct: (product: Product) => void;
   favorites: string[];
-  set즐겨찾기s: (ids: string[]) => void;
+  setFavorites: (ids: string[]) => void;
   watchlist: string[];
-  set관심추적list: (ids: string[]) => void;
+  setWatchlist: (ids: string[]) => void;
 }
 
 function SearchPage(props: SharedProps & { query: string; setQuery: (value: string) => void }) {
@@ -253,12 +265,12 @@ function SearchPage(props: SharedProps & { query: string; setQuery: (value: stri
 
 function CategoryPage(props: SharedProps & { slug: string }) {
   const category = getCategoryBySlug(props.slug) ?? categories[0];
-  const category제품 = products.filter((product) => product.categoryId === category.id);
+  const categoryProducts = products.filter((product) => product.categoryId === category.id);
   const categoryBrands = brands.filter((brand) => brand.categoryId === category.id);
   const [sort, setSort] = useState<SortOption>("Rarity");
   const [page, setPage] = useState(1);
   const [filters, setFilters] = useState({ brand: "All", year: "All", country: "All", condition: "All", marketplace: "All", price: "All" });
-  const page사이즈 = 30;
+  const pageSize = 30;
   const totalPages = 10;
   const filtered = useMemo(() => {
     const priceRanges: Record<string, (price: number) => boolean> = {
@@ -267,7 +279,7 @@ function CategoryPage(props: SharedProps & { slug: string }) {
       "$250-$750": (price) => price >= 250 && price <= 750,
       "$750+": (price) => price > 750,
     };
-    return category제품
+    return categoryProducts
       .filter((product) => filters.brand === "All" || product.brandId === filters.brand)
       .filter((product) => filters.year === "All" || String(product.releaseYear).startsWith(filters.year))
       .filter((product) => filters.country === "All" || product.country === filters.country)
@@ -280,8 +292,8 @@ function CategoryPage(props: SharedProps & { slug: string }) {
         if (sort === "Popularity") return b.popularity - a.popularity;
         return b.rarityScore - a.rarityScore;
       });
-  }, [category제품, filters, sort]);
-  const visible = filtered.slice((page - 1) * page사이즈, page * page사이즈);
+  }, [categoryProducts, filters, sort]);
+  const visible = filtered.slice((page - 1) * pageSize, page * pageSize);
   const events = timelineEvents.filter((event) => event.categoryId === category.id).slice(0, 8);
   const summary = summarizeMarket(archive.transactions.filter((sale) => getProduct(sale.productId)?.categoryId === category.id));
 
@@ -304,7 +316,7 @@ function CategoryPage(props: SharedProps & { slug: string }) {
       <ProductRail title="가격 변동 상위" products={topMovers(category.id)} {...props} />
       <ProductRail title="최신 아카이브 추가" products={newestAdditions(category.id)} {...props} />
       <section className="panel">
-        <div className="section-head"><div><p className="eyebrow">제품 아카이브</p><h2>{category제품.length.toLocaleString()} indexed references</h2><p>리서치와 비교에 최적화된 10페이지, 페이지당 30개 제품을 표시합니다.</p></div><select value={sort} onChange={(event) => setSort(event.target.value as SortOption)}>{[{ value: "Year", label: "연도" }, { value: "Price", label: "가격" }, { value: "Popularity", label: "인기도" }, { value: "Rarity", label: "희귀도" }].map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>
+        <div className="section-head"><div><p className="eyebrow">제품 아카이브</p><h2>{categoryProducts.length.toLocaleString()}개의 인덱스 레퍼런스</h2><p>리서치와 비교에 최적화된 10페이지, 페이지당 30개 제품을 표시합니다.</p></div><select value={sort} onChange={(event) => setSort(event.target.value as SortOption)}>{[{ value: "Year", label: "연도" }, { value: "Price", label: "가격" }, { value: "Popularity", label: "인기도" }, { value: "Rarity", label: "희귀도" }].map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>
         <FilterControls filters={filters} setFilters={setFilters} brands={categoryBrands} />
         <div className="product-grid dense">{visible.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
         <Pagination page={page} totalPages={totalPages} setPage={setPage} />
@@ -315,7 +327,7 @@ function CategoryPage(props: SharedProps & { slug: string }) {
 
 function BrandPage(props: SharedProps & { slug: string }) {
   const brand = getBrandBySlug(props.slug) ?? brands[0];
-  const brand제품 = products.filter((product) => product.brandId === brand.id);
+  const brandProducts = products.filter((product) => product.brandId === brand.id);
   const brandTags = tags.filter((tag) => tag.brandId === brand.id);
   const summary = summarizeMarket(archive.transactions.filter((sale) => getProduct(sale.productId)?.brandId === brand.id));
   const events = timelineEvents.filter((event) => event.brandId === brand.id || event.categoryId === brand.categoryId).slice(0, 7);
@@ -334,7 +346,7 @@ function BrandPage(props: SharedProps & { slug: string }) {
       </section>
       <section className="panel"><SectionTitle eyebrow="가격 추세" title="브랜드 마켓 요약" /><div className="stat-grid compact"><Stat label="중앙값" value={currency(summary.median)} /><Stat label="평균" value={currency(summary.average)} /><Stat label="최고 거래가" value={currency(summary.highest)} /><Stat label="유동성" value={liquidityLabel(summary.liquidity)} /></div></section>
       <section className="panel"><SectionTitle eyebrow="태그 아카이브" title="뮤지엄 스타일 라벨 기록" /><div className="tag-grid">{brandTags.map((tag) => <TagCard key={tag.id} tagId={tag.id} />)}</div></section>
-      <ProductRail title="희귀 아이템 및 관련 제품" products={brand제품.slice(0, 12)} {...props} />
+      <ProductRail title="희귀 아이템 및 관련 제품" products={brandProducts.slice(0, 12)} {...props} />
     </section>
   );
 }
@@ -511,18 +523,18 @@ function CopyrightPage() {
   );
 }
 
-function ProductRail({ title, products: rail제품, ...props }: SharedProps & { title: string; products: Product[] }) {
-  return <section className="panel"><SectionTitle eyebrow="Archive Index" title={title} /><div className="product-grid">{rail제품.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div></section>;
+function ProductRail({ title, products: railProducts, ...props }: SharedProps & { title: string; products: Product[] }) {
+  return <section className="panel"><SectionTitle eyebrow="Archive Index" title={title} /><div className="product-grid">{railProducts.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div></section>;
 }
 
-function ProductCard({ product, openProduct, favorites, set즐겨찾기s, watchlist, set관심추적list }: SharedProps & { product: Product }) {
+function ProductCard({ product, openProduct, favorites, setFavorites, watchlist, setWatchlist }: SharedProps & { product: Product }) {
   const brand = getBrand(product.brandId)!;
   const category = getCategory(product.categoryId)!;
   const toggle = (list: string[], setter: (ids: string[]) => void) => setter(list.includes(product.id) ? list.filter((id) => id !== product.id) : [...list, product.id]);
   return (
     <article className="product-card">
       <button className="image-button" onClick={() => openProduct(product)}><ArchiveImage product={product} compact /></button>
-      <div className="product-card-body"><p className="eyebrow">{brand.name} / {category.name}</p><h3><button onClick={() => openProduct(product)}>{product.name}</button></h3><div className="metric-row"><span>{product.releaseYear}</span><strong>{currency(product.marketPrice)}</strong></div><div className="pill-row"><span>Rarity {product.rarityScore}</span><span className={product.priceChangePercent >= 0 ? "up" : "down"}>{percent(product.priceChangePercent)}</span></div><div className="card-actions"><button onClick={() => toggle(favorites, set즐겨찾기s)}>{favorites.includes(product.id) ? "즐겨찾기d" : "즐겨찾기"}</button><button onClick={() => toggle(watchlist, set관심추적list)}>{watchlist.includes(product.id) ? "관심추적ing" : "관심추적"}</button></div></div>
+      <div className="product-card-body"><p className="eyebrow">{brand.name} / {category.name}</p><h3><button onClick={() => openProduct(product)}>{product.name}</button></h3><div className="metric-row"><span>{product.releaseYear}</span><strong>{currency(product.marketPrice)}</strong></div><div className="pill-row"><span>희귀도 {product.rarityScore}</span><span className={product.priceChangePercent >= 0 ? "up" : "down"}>{percent(product.priceChangePercent)}</span></div><div className="card-actions"><button onClick={() => toggle(favorites, setFavorites)}>{favorites.includes(product.id) ? "즐겨찾기됨" : "즐겨찾기"}</button><button onClick={() => toggle(watchlist, setWatchlist)}>{watchlist.includes(product.id) ? "추적 중" : "관심추적"}</button></div></div>
     </article>
   );
 }

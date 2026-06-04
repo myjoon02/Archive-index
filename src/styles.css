@@ -158,3 +158,280 @@ time { color: var(--gold); font-weight: 800; }
   .market-table div { grid-template-columns: 1fr; gap: 0.25rem; }
   .timeline-list li { grid-template-columns: 1fr; }
 }
+
+/* Grailed-inspired refinement: tighter typography, cleaner cards, denser browsing. */
+:root {
+  --panel: #0f0f0f;
+  --panel-soft: #151515;
+  --line: rgba(255, 255, 255, 0.12);
+  --muted: #a6a6a6;
+  --warm: #d8d2c6;
+  --gold: #b89a5e;
+  --gold-strong: #d7b56d;
+}
+
+body {
+  background: radial-gradient(circle at 12% 0%, rgba(184, 154, 94, 0.1), transparent 30rem), #050505;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+main {
+  width: min(1360px, calc(100% - 1.5rem));
+  padding-top: 0.9rem;
+}
+
+.topbar {
+  grid-template-columns: auto minmax(260px, 1fr) minmax(260px, 400px) auto;
+  gap: 0.75rem;
+  padding: 0.72rem clamp(0.85rem, 2vw, 1.4rem);
+  background: rgba(5, 5, 5, 0.94);
+}
+
+.brand-mark strong {
+  font-size: 1.08rem;
+  letter-spacing: 0.1em;
+}
+
+.desktop-nav {
+  justify-content: center;
+}
+
+.desktop-nav button,
+.footer button,
+.card-actions button,
+.review-actions button,
+.segmented button,
+.pagination button {
+  font-size: 0.82rem;
+  padding: 0.48rem 0.68rem;
+}
+
+.global-search input,
+input,
+select,
+textarea {
+  border-radius: 0.45rem;
+  padding: 0.68rem 0.78rem;
+  font-size: 0.9rem;
+  background: #090909;
+}
+
+.panel {
+  border-radius: 0.85rem;
+  padding: clamp(0.9rem, 1.5vw, 1.25rem);
+  background: linear-gradient(145deg, rgba(18, 18, 18, 0.98), rgba(8, 8, 8, 0.98));
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+}
+
+h1,
+h2,
+h3 {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: -0.045em;
+}
+
+h1 {
+  font-size: clamp(2.1rem, 5.2vw, 4.7rem);
+  line-height: 0.95;
+}
+
+h2 {
+  font-size: clamp(1.25rem, 2.2vw, 2rem);
+  line-height: 1.05;
+}
+
+h3 {
+  font-size: 1rem;
+  line-height: 1.18;
+}
+
+p {
+  font-size: 0.93rem;
+  line-height: 1.56;
+}
+
+.eyebrow {
+  font-size: 0.66rem;
+  letter-spacing: 0.14em;
+  margin-bottom: 0.45rem;
+}
+
+.gold-button,
+.ghost-button {
+  border-radius: 0.45rem;
+  padding: 0.68rem 0.88rem;
+  font-size: 0.86rem;
+}
+
+.hero-grid {
+  grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
+  gap: 0.75rem;
+}
+
+.hero-copy {
+  min-height: 24rem;
+}
+
+.page-hero {
+  min-height: 13rem;
+  align-items: center;
+}
+
+.category-grid,
+.product-grid,
+.tag-grid,
+.example-grid,
+.request-grid,
+.slide-grid {
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0.75rem;
+}
+
+.product-grid.dense {
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+}
+
+.product-card {
+  border-radius: 0.62rem;
+  background: #0b0b0b;
+  box-shadow: none;
+}
+
+.product-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.product-card-body {
+  padding: 0.72rem;
+}
+
+.product-card h3 button {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.94rem;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+.product-card .eyebrow {
+  color: var(--muted);
+  font-size: 0.62rem;
+  margin-bottom: 0.36rem;
+}
+
+.product-card .metric-row {
+  padding: 0.45rem 0;
+  font-size: 0.84rem;
+}
+
+.product-card .pill-row span {
+  font-size: 0.72rem;
+  padding: 0.28rem 0.48rem;
+}
+
+.card-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.card-actions button {
+  border-radius: 0.38rem;
+  padding: 0.48rem 0.35rem;
+}
+
+.archive-image {
+  border-radius: 0.55rem;
+  padding: 0.78rem;
+  background: linear-gradient(145deg, rgba(38, 35, 29, 0.86), rgba(12, 12, 12, 0.94)), repeating-linear-gradient(45deg, rgba(255,255,255,0.035), rgba(255,255,255,0.035) 1px, transparent 1px, transparent 9px);
+}
+
+.archive-image.compact {
+  aspect-ratio: 4 / 5;
+}
+
+.archive-image strong {
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(1.45rem, 4.5vw, 3rem);
+  letter-spacing: -0.06em;
+}
+
+.stat {
+  border-radius: 0.65rem;
+  padding: 0.78rem;
+}
+
+.stat strong {
+  font-size: 1.04rem;
+}
+
+.filter-panel {
+  gap: 0.55rem;
+}
+
+.brand-grid button,
+.link-grid a,
+.tag-card,
+.example-card,
+.slide-card,
+.chart-card {
+  border-radius: 0.65rem;
+}
+
+.market-table {
+  border-radius: 0.65rem;
+}
+
+.pagination {
+  gap: 0.28rem;
+}
+
+.pagination button.active {
+  border-color: var(--gold);
+  color: var(--gold-strong);
+}
+
+@media (max-width: 980px) {
+  .topbar {
+    grid-template-columns: 1fr;
+  }
+
+  .desktop-nav {
+    justify-content: flex-start;
+  }
+
+  .hero-copy {
+    min-height: 20rem;
+  }
+}
+
+@media (max-width: 620px) {
+  body {
+    font-size: 14px;
+  }
+
+  main,
+  .footer {
+    width: min(100% - 0.75rem, 1360px);
+  }
+
+  .category-grid,
+  .product-grid,
+  .product-grid.dense {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.55rem;
+  }
+
+  .product-card-body {
+    padding: 0.58rem;
+  }
+
+  .product-card h3 button {
+    font-size: 0.82rem;
+  }
+
+  .card-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
