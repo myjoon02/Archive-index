@@ -19,7 +19,6 @@ import {
   rareItemRequests,
   summarizeMarket,
   tags,
-  timelineEvents,
   type CategoryId,
   type CommunitySubmission,
   type Marketplace,
@@ -114,13 +113,13 @@ function App() {
   const [recent, setRecent] = useLocalIds("archive-index-recent");
   const [submissions, setSubmissions] = useState<CommunitySubmission[]>(communitySubmissions);
   const [gridColumns, setGridColumnsState] = useState<2 | 3 | 4>(() => {
-    const saved = Number(localStorage.getItem("archiveGridColumns"));
+    const saved = Number(localStorage.getItem("archive-grid-columns"));
     return saved === 2 || saved === 3 || saved === 4 ? saved : 4;
   });
 
   const setGridColumns = (columns: 2 | 3 | 4) => {
     setGridColumnsState(columns);
-    localStorage.setItem("archiveGridColumns", String(columns));
+    localStorage.setItem("archive-grid-columns", String(columns));
   };
 
   useEffect(() => {
@@ -404,7 +403,7 @@ function SearchPage(props: SharedProps & { query: string; setQuery: (value: stri
         <select value={year} onChange={(event) => setYear(event.target.value)}><option value="All">전체</option>{["194", "195", "196", "197", "198", "199", "200"].map((item) => <option key={item}>{item}0년대</option>)}</select>
         <select value={country} onChange={(event) => setCountry(event.target.value)}><option value="All">전체</option>{Array.from(new Set(validProducts.map((item) => item.country))).map((item) => <option key={item}>{item}</option>)}</select>
       </div>
-      <div className="section-head product-rail-head"><SectionTitle eyebrow="Search Results" title={`${results.length}개 검색 결과`} /><GridToggle gridColumns={props.gridColumns} setGridColumns={props.setGridColumns} /></div><div className={`product-grid grid-${props.gridColumns}`}>{results.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
+      <div className="section-head product-rail-head"><SectionTitle eyebrow="Search Results" title={`${results.length}개 검색 결과`} /><GridToggle gridColumns={props.gridColumns} setGridColumns={props.setGridColumns} /></div><div className={`product-grid grid-${props.gridColumns}`} style={{ gridTemplateColumns: `repeat(${props.gridColumns}, minmax(0, 1fr))` }}>{results.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
     </section>
   );
 }
@@ -484,7 +483,7 @@ function CategoryPage(props: SharedProps & { slug: string }) {
       <section className="panel">
         <div className="section-head"><div><p className="eyebrow">제품 아카이브</p><h2>{categoryProducts.length.toLocaleString()}개의 인덱스 레퍼런스</h2><p>리서치와 비교에 최적화된 10페이지, 페이지당 30개 제품을 표시합니다.</p></div><select value={sort} onChange={(event) => setSort(event.target.value as SortOption)}>{[{ value: "Year", label: "연도" }, { value: "Price", label: "가격" }, { value: "Popularity", label: "인기도" }, { value: "Rarity", label: "희귀도" }].map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>
         <FilterControls filters={filters} setFilters={setFilters} brands={categoryBrands} />
-        <div className="section-head product-rail-head"><SectionTitle eyebrow="View" title="보기 방식" /><GridToggle gridColumns={props.gridColumns} setGridColumns={props.setGridColumns} /></div><div className={`product-grid dense grid-${props.gridColumns}`}>{visible.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
+        <div className="section-head product-rail-head"><SectionTitle eyebrow="View" title="보기 방식" /><GridToggle gridColumns={props.gridColumns} setGridColumns={props.setGridColumns} /></div><div className={`product-grid dense grid-${props.gridColumns}`} style={{ gridTemplateColumns: `repeat(${props.gridColumns}, minmax(0, 1fr))` }}>{visible.map((product) => <ProductCard key={product.id} product={product} {...props} />)}</div>
         <Pagination page={page} totalPages={totalPages} setPage={setPage} />
       </section>
     </section>
@@ -494,25 +493,50 @@ function CategoryPage(props: SharedProps & { slug: string }) {
 function BrandPage(props: SharedProps & { slug: string }) {
   const brand = getBrandBySlug(props.slug) ?? brands[0];
   const brandProducts = validProducts.filter((product) => product.brandId === brand.id);
-  const brandTags = tags.filter((tag) => tag.brandId === brand.id);
+  const brandTags = tags.filter((tag) => tag.brandId === brand.id && validProductIds.has(tag.productId));
   const summary = summarizeMarket(validTransactions.filter((sale) => getProduct(sale.productId)?.brandId === brand.id));
-  const events = timelineEvents.filter((event) => event.brandId === brand.id || event.categoryId === brand.categoryId).slice(0, 7);
+  const profile = brandArchiveProfile(brand.name, brand.categoryId, brand.foundingYear, brand.country);
+  const representativeProducts = representativeBrandProducts(brand.name, brandProducts);
 
   return (
-    <section className="page-stack">
-      <PageHero eyebrow={`${brand.country} / 설립 ${brand.foundingYear}년`} title={brand.name} description={brand.history} />
+    <section className="page-stack brand-page-redesign">
+      <PageHero eyebrow={`${brand.country} / 설립 ${brand.foundingYear}년`} title={brand.name} description={profile.description} />
       <section className="split-grid">
-        <div className="panel"><SectionTitle eyebrow="주요 순간" title="브랜드 역사" /><ul className="timeline-list small">{brand.keyMoments.map((moment) => <li key={moment}>{moment}</li>)}</ul></div>
-        <div className="panel"><SectionTitle eyebrow="제조 국가" title="생산 지역" /><div className="pill-row">{brand.manufacturingCountries.map((country) => <span key={country}>{country}</span>)}</div><p>{getCategory(brand.categoryId)?.marketNarrative}</p></div>
+        <div className="panel brand-history-card">
+          <SectionTitle eyebrow="Brand History" title="브랜드 소개" />
+          <p>{profile.history}</p>
+        </div>
+        <div className="panel">
+          <SectionTitle eyebrow="제조 국가" title="생산 지역" />
+          <div className="pill-row">{brand.manufacturingCountries.map((country) => <span key={country}>{country}</span>)}</div>
+          <p>{getCategory(brand.categoryId)?.marketNarrative}</p>
+        </div>
       </section>
-      <Timeline events={events} />
+
+      <BrandTimeline events={profile.timeline} />
+
+      <section className="panel">
+        <SectionTitle eyebrow="대표 아카이브" title={`${brand.name} 주요 레퍼런스`} />
+        <div className="representative-archive-list">
+          {representativeProducts.map((item) => {
+            const matched = brandProducts.find((product) => product.name.toLowerCase().includes(item.toLowerCase().split(" ")[0])) ?? brandProducts[0];
+            return (
+              <button key={item} onClick={() => matched && props.openProduct(matched)}>
+                <strong>{item}</strong>
+                <span>{matched ? `${matched.releaseYear} / Archive Score ${matched.archiveScore}` : "레퍼런스 준비 중"}</span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
       <section className="split-grid">
         <div className="panel"><SectionTitle eyebrow="태그 변화" title="라벨 연대 구간" />{brand.tagEvolution.map((item) => <p className="note" key={item}>{item}</p>)}</div>
         <div className="panel"><SectionTitle eyebrow="인증 가이드" title="확인해야 할 요소" /><ul className="check-list">{brand.authenticationGuide.map((item) => <li key={item}>{item}</li>)}</ul></div>
       </section>
       <section className="panel"><SectionTitle eyebrow="가격 추세" title="브랜드 마켓 요약" /><div className="stat-grid compact"><Stat label="중앙값" value={currency(summary.median)} /><Stat label="평균" value={currency(summary.average)} /><Stat label="최고 거래가" value={currency(summary.highest)} /><Stat label="유동성" value={liquidityLabel(summary.liquidity)} /></div></section>
-      <section className="panel"><SectionTitle eyebrow="태그 아카이브" title="뮤지엄 스타일 라벨 기록" /><div className="tag-grid">{brandTags.map((tag) => <TagCard key={tag.id} tagId={tag.id} />)}</div></section>
-      <ProductRail title="희귀 아이템 및 관련 제품" products={brandProducts.slice(0, 12)} {...props} />
+      <section className="panel"><SectionTitle eyebrow="태그 아카이브" title="라벨 기록" /><div className="tag-grid">{brandTags.map((tag) => <TagCard key={tag.id} tagId={tag.id} />)}</div></section>
+      <ProductRail title="브랜드 관련 제품" products={brandProducts.slice(0, 12)} {...props} />
     </section>
   );
 }
@@ -721,7 +745,7 @@ function ProductRail({ title, products: railProducts, gridColumns, setGridColumn
         <SectionTitle eyebrow="Archive Index" title={title} />
         <GridToggle gridColumns={gridColumns} setGridColumns={setGridColumns} />
       </div>
-      <div className={`product-grid grid-${gridColumns}`}>{railProducts.map((product) => <ProductCard key={product.id} product={product} gridColumns={gridColumns} setGridColumns={setGridColumns} {...props} />)}</div>
+      <div className={`product-grid grid-${gridColumns}`} style={{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }}>{railProducts.map((product) => <ProductCard key={product.id} product={product} gridColumns={gridColumns} setGridColumns={setGridColumns} {...props} />)}</div>
     </section>
   );
 }
@@ -825,6 +849,121 @@ function BarChart({ points, label }: { points: { volume: number; date: string }[
   return <div className="chart-card"><p>{label}</p><div className="bar-chart">{points.map((point, index) => <span key={`${point.date}-${index}`} style={{ height: `${Math.max(8, (point.volume / max) * 100)}%` }} />)}</div><div className="metric-row"><span>{points[0]?.date}</span><strong>{points.reduce((sum, point) => sum + point.volume, 0)} sales</strong></div></div>;
 }
 
+
+
+interface BrandTimelineEvent {
+  year: number;
+  title: string;
+  description: string;
+}
+
+interface BrandArchiveProfile {
+  description: string;
+  history: string;
+  timeline: BrandTimelineEvent[];
+  representativeProducts: string[];
+}
+
+const curatedBrandProfiles: Record<string, BrandArchiveProfile> = {
+  Carhartt: {
+    description: "Carhartt는 1889년 Hamilton Carhartt가 시작한 미국 워크웨어 브랜드로, 철도 노동자와 산업 현장의 작업복을 기반으로 빈티지 워크웨어 아카이브의 핵심 기준이 되었습니다.",
+    history: "Carhartt는 덕 캔버스, 더블니 팬츠, 디트로이트 재킷, 액티브 재킷처럼 노동 현장에서 검증된 의류를 만들었습니다. 1990년대 이후 힙합과 스케이트 문화에서 재해석되며 기능복과 서브컬처가 만나는 대표 사례가 되었습니다.",
+    timeline: [
+      { year: 1889, title: "Hamilton Carhartt 설립", description: "디트로이트에서 철도 노동자를 위한 견고한 작업복 생산을 시작했습니다." },
+      { year: 1910, title: "철도 노동자 작업복 생산 확대", description: "오버롤과 덕 캔버스 제품군이 미국 노동복의 표준으로 확산되었습니다." },
+      { year: 1989, title: "유럽 진출 시작", description: "워크웨어가 유럽 시장과 서브컬처 씬에서 새롭게 해석되기 시작했습니다." },
+      { year: 1994, title: "힙합 문화에서 인지도 상승", description: "오버사이즈 워크웨어가 힙합과 스트리트 스타일의 중요한 실루엣이 되었습니다." },
+      { year: 1997, title: "Carhartt WIP 시작", description: "Work In Progress 라인이 유럽 스트리트웨어 시장에서 브랜드를 재맥락화했습니다." },
+    ],
+    representativeProducts: ["Detroit Jacket", "Active Jacket", "Double Knee Pant"],
+  },
+  Stussy: {
+    description: "Stussy는 1980년 Shawn Stussy가 시작한 브랜드로, 현대 스트리트웨어의 기초를 만든 브랜드 중 하나입니다.",
+    history: "Stussy는 서핑 문화와 펑크, 힙합, 클럽 문화를 결합하며 전 세계 스트리트웨어 씬에 큰 영향을 미쳤습니다. 로고, 그래픽 티셔츠, Tribe 네트워크는 스트리트웨어가 커뮤니티 기반 문화로 확장되는 방식을 보여줍니다.",
+    timeline: [
+      { year: 1980, title: "Shawn Stussy가 브랜드 시작", description: "서프보드 시그니처에서 출발한 로고가 티셔츠와 캡으로 확장되었습니다." },
+      { year: 1984, title: "그래픽 티셔츠 생산 확대", description: "로고 티셔츠와 그래픽 제품이 서프 컬처 밖으로 확산되었습니다." },
+      { year: 1988, title: "국제 시장 진출", description: "미국 서부 기반의 로컬 브랜드가 글로벌 스트리트웨어 언어로 확장되었습니다." },
+      { year: 1991, title: "International Stussy Tribe 형성", description: "뮤지션, DJ, 스케이터, 크리에이터 네트워크가 브랜드 문화의 중심이 되었습니다." },
+      { year: 2000, title: "스트리트웨어 대표 브랜드로 자리잡음", description: "초기 태그와 그래픽은 빈티지 스트리트웨어 시장의 핵심 레퍼런스가 되었습니다." },
+    ],
+    representativeProducts: ["Dragon Tee", "8 Ball Jacket", "International Tribe Tee"],
+  },
+  Supreme: {
+    description: "Supreme은 1994년 뉴욕 Lafayette Street에서 시작한 스케이트숍 기반 브랜드로, 드롭 문화와 박스 로고를 통해 현대 리세일 문화를 형성했습니다.",
+    history: "Supreme은 스케이트보드, 아트, 음악, 패션 협업을 결합하며 한정 발매와 커뮤니티 기반 소유 문화를 만들었습니다. 초기 티셔츠와 협업 제품은 스트리트웨어 아카이브에서 중요한 시장 데이터 기준입니다.",
+    timeline: [
+      { year: 1994, title: "뉴욕 Lafayette Street 첫 매장", description: "스케이터 친화적 매장 구조와 로컬 커뮤니티 기반 유통을 시작했습니다." },
+      { year: 2000, title: "박스 로고 문화 확산", description: "로고 제품이 스트리트웨어 희소성과 정체성의 상징이 되었습니다." },
+      { year: 2012, title: "Comme des Garcons 협업", description: "하이패션과 스트리트웨어 협업의 대표 사례로 기록됩니다." },
+      { year: 2017, title: "VF 이전 투자 단계", description: "글로벌 브랜드로 확장되기 전 시장 가치가 크게 상승했습니다." },
+      { year: 2020, title: "VF Corp 인수", description: "독립 스케이트숍 기반 브랜드가 대형 패션 그룹에 편입되었습니다." },
+    ],
+    representativeProducts: ["Box Logo Tee", "Photo Tee", "Coach Jacket"],
+  },
+  "Raf Simons": {
+    description: "Raf Simons는 1995년 시작된 벨기에 디자이너 브랜드로, 청소년 문화와 음악, 유럽 서브컬처를 런웨이 언어로 번역했습니다.",
+    history: "Raf Simons의 초기 컬렉션은 그래픽, 슬림 실루엣, 정치적/음악적 레퍼런스를 결합하며 디자이너 아카이브 시장의 핵심 축이 되었습니다. 특정 시즌명과 컬렉션 맥락이 제품 가치에 직접 연결됩니다.",
+    timeline: [
+      { year: 1995, title: "브랜드 설립", description: "벨기에 기반 남성복 브랜드로 독립적인 청소년 문화 서사를 시작했습니다." },
+      { year: 2001, title: "Riot Riot Riot 컬렉션", description: "펑크와 반항적 그래픽을 결합한 컬트 컬렉션으로 기록됩니다." },
+      { year: 2005, title: "Jil Sander 합류", description: "미니멀 럭셔리 하우스에서 크리에이티브 디렉터로 활동을 시작했습니다." },
+      { year: 2012, title: "Dior 크리에이티브 디렉터", description: "하이패션 메종의 꾸뛰르 언어와 본인의 서브컬처 감각을 연결했습니다." },
+      { year: 2023, title: "동명 브랜드 종료", description: "Raf Simons 라인의 종료로 초기 아카이브 수요와 연구 가치가 재조명되었습니다." },
+    ],
+    representativeProducts: ["Riot Riot Riot", "Nebraska Sweatshirt", "Consumed Collection"],
+  },
+  "Helmut Lang": {
+    description: "Helmut Lang은 1986년 시작된 브랜드로, 1990년대 미니멀리즘과 산업적 소재, 도시적 실루엣을 대표합니다.",
+    history: "Helmut Lang은 광고, 온라인 런웨이, 유틸리티 디테일, 정제된 테일러링을 통해 현대 패션 시스템의 기준을 앞서 제시했습니다. 초기 라벨과 1990년대 생산분은 디자이너 아카이브 시장의 핵심 레퍼런스입니다.",
+    timeline: [
+      { year: 1986, title: "브랜드 설립", description: "오스트리아 기반 브랜드로 절제된 테일러링과 실험적 소재를 전개했습니다." },
+      { year: 1994, title: "미니멀리즘 대표 브랜드로 성장", description: "도시적 실루엣과 기능적 디테일로 1990년대 패션 언어를 정의했습니다." },
+      { year: 1998, title: "온라인 런웨이 선구적 시도", description: "인터넷을 통한 컬렉션 공개로 패션 커뮤니케이션 방식을 앞서 실험했습니다." },
+      { year: 2005, title: "브랜드 이탈", description: "Helmut Lang 본인이 브랜드를 떠나며 초기 아카이브의 역사적 구분점이 생겼습니다." },
+    ],
+    representativeProducts: ["Bondage Trouser", "Astro Jacket", "Painter Denim"],
+  },
+};
+
+function brandArchiveProfile(name: string, categoryId: CategoryId, foundingYear: number, country: string): BrandArchiveProfile {
+  const curated = curatedBrandProfiles[name];
+  if (curated) return curated;
+  const categoryName = getCategory(categoryId)?.name ?? "빈티지";
+  return {
+    description: `${name}은(는) ${foundingYear}년 ${country}에서 시작된 ${categoryName} 아카이브 브랜드입니다.`,
+    history: `${name}의 아카이브 가치는 생산국, 라벨, 태그, 소재, 시장 거래 기록을 함께 검토할 때 더 명확해집니다. 현재 상세 히스토리는 검증 가능한 출처를 기준으로 보강 중입니다.`,
+    timeline: [],
+    representativeProducts: representativeBrandProducts(name, []),
+  };
+}
+
+function representativeBrandProducts(name: string, productsForBrand: Product[]) {
+  const curated = curatedBrandProfiles[name]?.representativeProducts;
+  if (curated?.length) return curated;
+  const fromProducts = productsForBrand.slice().sort((a, b) => b.archiveScore - a.archiveScore).slice(0, 3).map((product) => product.name.replace(`${name} `, ""));
+  return fromProducts.length ? fromProducts : ["대표 아카이브 준비 중"];
+}
+
+function BrandTimeline({ events }: { events: BrandTimelineEvent[] }) {
+  return (
+    <section className="panel brand-timeline-section">
+      <SectionTitle eyebrow="Historic Timeline" title="브랜드 역사 타임라인" />
+      {events.length ? (
+        <div className="brand-timeline-cards">
+          {events.map((event) => (
+            <article key={`${event.year}-${event.title}`} className="brand-timeline-card">
+              <time>{event.year}</time>
+              <div><strong>{event.title}</strong><p>{event.description}</p></div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="empty-state">Historic Timeline 준비 중입니다.</p>
+      )}
+    </section>
+  );
+}
 
 function categoryHistoricalEvents(categoryId: CategoryId) {
   const events: Record<CategoryId, Array<{ id: string; year: number; title: string; description: string; marketImpact: string; type: string }>> = {
