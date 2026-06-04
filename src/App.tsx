@@ -236,6 +236,9 @@ interface ProductImageCollection {
   brand: string;
   year: number;
   mainImage?: ProductImageRecord;
+  imageStatus: "FOUND" | "PENDING" | "NOT_FOUND";
+  retryCount: number;
+  nextRetryAt?: string;
   images: {
     front?: ProductImageRecord;
     back?: ProductImageRecord;
@@ -536,25 +539,26 @@ const getProductImageCollection = (product: Product, submissions: CommunitySubmi
     const slot = imageSlotForType(image.type);
     if (!slots[slot]) slots[slot] = image;
   });
+  const imageStatus = all[0] ? "FOUND" : "PENDING";
   return {
     id: product.id,
     brand,
     year: product.releaseYear,
     mainImage: all[0],
+    imageStatus,
+    retryCount: imageStatus === "FOUND" ? 0 : Math.min(30, Number(localStorage.getItem(`image-retry-${product.id}`) ?? 0)),
+    nextRetryAt: imageStatus === "FOUND" ? undefined : new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
     images: slots,
     all,
   };
 };
 
-const rejectProduct = (_product: Product) => false;
-
 const hasRequiredRegistrationData = (product: Product) => {
   const brand = getBrand(product.brandId);
-  const collection = getProductImageCollection(product, []);
-  return Boolean(collection.mainImage && brand?.name && product.releaseYear && product.name.trim());
+  return Boolean(brand?.name && product.releaseYear && product.name.trim());
 };
 
-const validProducts = baseArchiveProducts.filter((product) => hasRequiredRegistrationData(product) || rejectProduct(product));
+const validProducts = baseArchiveProducts.filter(hasRequiredRegistrationData);
 const validProductIds = new Set(validProducts.map((product) => product.id));
 const validTransactions = archive.transactions.filter((transaction) => validProductIds.has(transaction.productId));
 const validTags = tags.filter((tag) => validProductIds.has(tag.productId));
@@ -1048,7 +1052,7 @@ function BrandPage(props: SharedProps & { slug: string }) {
 
 function ProductPage(props: SharedProps & { slug: string; submissions: CommunitySubmission[] }) {
   const product = validProducts.find((item) => item.slug === props.slug);
-  if (!product) return <PageHero eyebrow="Product" title="등록된 제품 이미지를 찾을 수 없습니다" description="대표 이미지가 검증된 제품만 아카이브에 등록됩니다." />;
+  if (!product) return <PageHero eyebrow="Product" title="제품을 찾을 수 없습니다" description="제품명, 브랜드, 연도 정보가 확인된 제품만 아카이브에 등록됩니다." />;
   const brand = getBrand(product.brandId)!;
   const category = getCategory(product.categoryId)!;
   const tag = getTag(product.tagId)!;
@@ -1064,7 +1068,7 @@ function ProductPage(props: SharedProps & { slug: string; submissions: Community
   return (
     <section className="page-stack">
       <div className="product-layout product-gallery-layout">
-        {productImages.length > 0 && <div className="panel sticky-panel gallery-panel"><ProductGallery product={product} images={productImages} /></div>}
+        <div className="panel sticky-panel gallery-panel">{productImages.length > 0 ? <ProductGallery product={product} images={productImages} /> : <ProductImageStatusPanel product={product} />}</div>
         <div className="product-main panel">
           <p className="eyebrow">{category.name} / {product.referenceNumber}</p>
           <h1>{product.name}</h1>
@@ -1123,7 +1127,7 @@ function ContributionPage({ navigate, submissions, setSubmissions }: { navigate:
   const [photos, setPhotos] = useState(["앞면", "뒷면"]);
   const product = validProducts.find((item) => item.id === selectedProduct);
 
-  if (!product) return <PageHero eyebrow="Archive Submission" title="아카이브 제출" description="대표 이미지가 검증된 제품만 등록할 수 있습니다." />;
+  if (!product) return <PageHero eyebrow="Archive Submission" title="아카이브 제출" description="제품명, 브랜드, 연도 정보가 확인된 제품만 등록할 수 있습니다." />;
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1192,9 +1196,9 @@ function AdminPage({ submissions, setSubmissions }: { submissions: CommunitySubm
         <div className="admin-image-grid">
           {imageQueue.map(({ submission, product, images }) => (
             <article key={submission.id}>
-              {images[0] ? <ProductImageView image={images[0]} product={product} compact /> : null}
+              {images[0] ? <ProductImageView image={images[0]} product={product} compact /> : <ProductDefaultVisual product={product} compact />}
               <strong>{product.name}</strong>
-              <span>{statusLabel(submission.status)} / {images.length} verified photos</span>
+              <span>{statusLabel(submission.status)} / {getProductImageCollection(product).imageStatus} / {images.length} verified photos</span>
               <div className="admin-inline-actions"><button onClick={() => updateStatus(submission.id, "Approved")}>Approve</button><button onClick={() => updateStatus(submission.id, "Rejected")}>Delete</button><button onClick={() => updateStatus(submission.id, "Flagged")}>Request Replace</button></div>
             </article>
           ))}
@@ -1218,7 +1222,7 @@ function ContentGeneratorPage({ openProduct }: { openProduct: (product: Product)
   const [productId, setProductId] = useState(validProducts[0]?.id ?? "");
   const [format, setFormat] = useState("인스타그램 캐러셀");
   const product = validProducts.find((item) => item.id === productId);
-  if (!product) return <PageHero eyebrow="콘텐츠 생성기" title="생성 가능한 아카이브 제품이 없습니다" description="대표 이미지가 검증된 제품이 등록되면 콘텐츠를 생성할 수 있습니다." />;
+  if (!product) return <PageHero eyebrow="콘텐츠 생성기" title="생성 가능한 아카이브 제품이 없습니다" description="제품명, 브랜드, 연도 정보가 확인된 제품이 등록되면 콘텐츠를 생성할 수 있습니다." />;
   const brand = getBrand(product.brandId)!;
   const tag = getTag(product.tagId)!;
   const summary = summarizeMarket(productTransactions(product.id));
@@ -1292,9 +1296,9 @@ function ProductCard({ product, openProduct, favorites, setFavorites, watchlist,
   const toggle = (list: string[], setter: (ids: string[]) => void) => setter(list.includes(product.id) ? list.filter((id) => id !== product.id) : [...list, product.id]);
   return (
     <article className="product-card image-product-card">
-      {image ? <button className="image-button" onClick={() => openProduct(product)} aria-label={`${product.name} 상세 보기`}>
-        <ProductImageView image={image} product={product} compact />
-      </button> : null}
+      <button className="image-button" onClick={() => openProduct(product)} aria-label={`${product.name} 상세 보기`}>
+        {image ? <ProductImageView image={image} product={product} compact /> : <ProductDefaultVisual product={product} compact />}
+      </button>
       <div className="product-card-body">
         <p className="eyebrow">{category.name}</p>
         <h3><button onClick={() => openProduct(product)}>{product.name}</button></h3>
@@ -1307,6 +1311,23 @@ function ProductCard({ product, openProduct, favorites, setFavorites, watchlist,
   );
 }
 
+
+
+function ProductImageStatusPanel({ product }: { product: Product }) {
+  const collection = getProductImageCollection(product);
+  return (
+    <section className="image-status-panel">
+      <ProductDefaultVisual product={product} />
+      <div>
+        <p className="eyebrow">Image Status</p>
+        <h3>{collection.imageStatus}</h3>
+        <p>이미지는 제품 등록과 분리되어 매일 재검색됩니다. 최대 30회까지 실제 제품 사진을 다시 찾습니다.</p>
+        <div className="metric-row"><span>Retry</span><strong>{collection.retryCount}/30</strong></div>
+        {collection.nextRetryAt && <div className="metric-row"><span>Next Retry</span><strong>{collection.nextRetryAt}</strong></div>}
+      </div>
+    </section>
+  );
+}
 
 function ProductGallery({ product, images }: { product: Product; images: ProductImageRecord[] }) {
   const [activeType, setActiveType] = useState<ProductImageType | null>(images[0]?.type ?? null);
@@ -1357,6 +1378,20 @@ function ProductGallery({ product, images }: { product: Product; images: Product
   );
 }
 
+
+
+function ProductDefaultVisual({ product, compact = false }: { product: Product; compact?: boolean }) {
+  const brand = getBrand(product.brandId)?.name ?? "ARCHIVE";
+  const category = getCategory(product.categoryId)?.name ?? "Archive";
+  const collection = getProductImageCollection(product);
+  return (
+    <div className={`default-product-visual ${compact ? "compact" : ""}`}>
+      <span>{category}</span>
+      <strong>{brand}</strong>
+      <small>{collection.imageStatus} / retry {collection.retryCount}/30</small>
+    </div>
+  );
+}
 
 function ProductImageView({ image, product, compact = false, onOpen }: { image: ProductImageRecord; product: Product; compact?: boolean; onOpen?: () => void }) {
   return (
