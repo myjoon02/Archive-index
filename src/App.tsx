@@ -65,11 +65,7 @@ const isValidArchiveProduct = (product: Product) => {
   return product.releaseYear >= minArchiveYear && product.releaseYear <= maxArchiveYear && !invalidTitleKeywords.some((keyword) => normalizedTitle.includes(keyword));
 };
 
-const validProducts = products.filter(isValidArchiveProduct);
-const validProductIds = new Set(validProducts.map((product) => product.id));
-const validTransactions = archive.transactions.filter((transaction) => validProductIds.has(transaction.productId));
-const validTags = tags.filter((tag) => validProductIds.has(tag.productId));
-const visibleBrands = brands.filter((brand) => validProducts.some((product) => product.brandId === brand.id));
+const baseArchiveProducts = products.filter(isValidArchiveProduct);
 
 const searchValidArchive = (query: string) => {
   const normalized = query.trim().toLowerCase();
@@ -190,14 +186,6 @@ const generateProductTags = (product: Product): ArchiveTag[] => {
 };
 
 const productTagIds = (product: Product) => generateProductTags(product).map((tag) => tag.id);
-const allArchiveTags = Array.from(new Map(validProducts.flatMap(generateProductTags).map((tag) => [tag.id, tag])).values()).sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
-const productsForTag = (tagId: string) => validProducts.filter((product) => productTagIds(product).includes(tagId)).sort((a, b) => b.archiveScore - a.archiveScore);
-const tagBySlug = (slug: string) => allArchiveTags.find((tag) => tag.id === slug);
-const topArchiveTags = allArchiveTags
-  .map((tag) => ({ tag, count: productsForTag(tag.id).length }))
-  .filter((item) => item.count > 0)
-  .sort((a, b) => b.count - a.count)
-  .slice(0, 12);
 
 const imageTypeMap: Record<string, ProductImageType> = {
   "Front View": "Front View",
@@ -324,7 +312,7 @@ const buildImageSearchQueries = (product: Product) => {
 };
 
 const similarProductsForImageFallback = (product: Product) =>
-  validProducts
+  baseArchiveProducts
     .filter((candidate) => candidate.id !== product.id)
     .filter((candidate) => candidate.brandId === product.brandId || candidate.categoryId === product.categoryId)
     .sort((a, b) => {
@@ -470,6 +458,28 @@ const getProductImageCollection = (product: Product, submissions: CommunitySubmi
     all,
   };
 };
+
+const rejectProduct = (_product: Product) => false;
+
+const hasRequiredRegistrationData = (product: Product) => {
+  const brand = getBrand(product.brandId);
+  const collection = getProductImageCollection(product, []);
+  return Boolean(collection.mainImage && brand?.name && product.releaseYear && product.name.trim());
+};
+
+const validProducts = baseArchiveProducts.filter((product) => hasRequiredRegistrationData(product) || rejectProduct(product));
+const validProductIds = new Set(validProducts.map((product) => product.id));
+const validTransactions = archive.transactions.filter((transaction) => validProductIds.has(transaction.productId));
+const validTags = tags.filter((tag) => validProductIds.has(tag.productId));
+const visibleBrands = brands.filter((brand) => validProducts.some((product) => product.brandId === brand.id));
+const allArchiveTags = Array.from(new Map(validProducts.flatMap(generateProductTags).map((tag) => [tag.id, tag])).values()).sort((a, b) => a.group.localeCompare(b.group) || a.label.localeCompare(b.label));
+const productsForTag = (tagId: string) => validProducts.filter((product) => productTagIds(product).includes(tagId)).sort((a, b) => b.archiveScore - a.archiveScore);
+const tagBySlug = (slug: string) => allArchiveTags.find((tag) => tag.id === slug);
+const topArchiveTags = allArchiveTags
+  .map((tag) => ({ tag, count: productsForTag(tag.id).length }))
+  .filter((item) => item.count > 0)
+  .sort((a, b) => b.count - a.count)
+  .slice(0, 12);
 
 const getProductImages = (product: Product, submissions: CommunitySubmission[] = communitySubmissions) => getProductImageCollection(product, submissions).all;
 const primaryProductImage = (product: Product) => getProductImageCollection(product).mainImage;
@@ -1092,7 +1102,7 @@ function AdminPage({ submissions, setSubmissions }: { submissions: CommunitySubm
         <div className="admin-image-grid">
           {imageQueue.map(({ submission, product, images }) => (
             <article key={submission.id}>
-              {images[0] ? <ProductImageView image={images[0]} product={product} compact /> : <ProductImageUnavailable product={product} compact />}
+              {images[0] ? <ProductImageView image={images[0]} product={product} compact /> : null}
               <strong>{product.name}</strong>
               <span>{statusLabel(submission.status)} / {images.length} verified photos</span>
               <div className="admin-inline-actions"><button onClick={() => updateStatus(submission.id, "Approved")}>Approve</button><button onClick={() => updateStatus(submission.id, "Rejected")}>Delete</button><button onClick={() => updateStatus(submission.id, "Flagged")}>Request Replace</button></div>
@@ -1193,7 +1203,7 @@ function ProductCard({ product, openProduct, favorites, setFavorites, watchlist,
     <article className="product-card image-product-card">
       {image ? <button className="image-button" onClick={() => openProduct(product)} aria-label={`${product.name} 상세 보기`}>
         <ProductImageView image={image} product={product} compact />
-      </button> : <button className="image-button" onClick={() => openProduct(product)} aria-label={`${product.name} 상세 보기`}><ProductImageUnavailable product={product} /></button>}
+      </button> : null}
       <div className="product-card-body">
         <p className="eyebrow">{category.name}</p>
         <h3><button onClick={() => openProduct(product)}>{product.name}</button></h3>
@@ -1256,15 +1266,6 @@ function ProductGallery({ product, images }: { product: Product; images: Product
   );
 }
 
-
-function ProductImageUnavailable({ product, compact = false }: { product: Product; compact?: boolean }) {
-  return (
-    <div className={`image-unavailable ${compact ? "compact" : ""}`}>
-      <span>Image Not Available</span>
-      <small>{getBrand(product.brandId)?.name} / {product.releaseYear}</small>
-    </div>
-  );
-}
 
 function ProductImageView({ image, product, compact = false, onOpen }: { image: ProductImageRecord; product: Product; compact?: boolean; onOpen?: () => void }) {
   return (
